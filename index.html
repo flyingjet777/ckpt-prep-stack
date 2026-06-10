@@ -58,7 +58,7 @@
 
 
     <!-- Hidden file input for PDF import -->
-    <input type="file" id="pdf-file-input" accept="application/pdf" style="display: none;">
+    <input type="file" id="pdf-file-input" accept="application/pdf" style="opacity: 0; position: absolute; z-index: -1;" onclick="this.value=null;">
 
     <script src="app.js?v=55"></script>
 </body>
