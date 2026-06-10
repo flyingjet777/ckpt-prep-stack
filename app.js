@@ -1417,9 +1417,10 @@ if (typeof pdfjsLib !== 'undefined') {
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
 }
 
-document.getElementById('pdf-file-input')?.addEventListener('change', async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
+document.addEventListener('change', async (e) => {
+    if (e.target && e.target.id === 'pdf-file-input') {
+        const file = e.target.files[0];
+        if (!file) return;
 
     // Show temporary status inside FMS bezel
     const pageTitle = document.getElementById('page-title-text');
@@ -1594,6 +1595,7 @@ document.getElementById('pdf-file-input')?.addEventListener('change', async (e) 
             if (progressContainer) progressContainer.style.display = 'none';
             renderInitPage();
         }, 1200);
+    }
     }
 });
 
