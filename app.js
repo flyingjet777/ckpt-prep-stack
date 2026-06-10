@@ -1541,9 +1541,7 @@ document.getElementById('pdf-file-input')?.addEventListener('change', async (e) 
         setProgress(40);
 
         let fullText = '';
-        // OFP first-page data lives in the first few pages; the full Aviator
-        // package can be 90+ pages (NOTAM/WX), so cap parsing for speed.
-        const numPages = Math.min(pdf.numPages, 6);
+        const numPages = pdf.numPages;
 
         for (let i = 1; i <= numPages; i++) {
             const page = await pdf.getPage(i);
