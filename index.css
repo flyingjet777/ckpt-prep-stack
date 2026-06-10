@@ -1,0 +1,563 @@
+:root {
+    --bg-color: #080a0f;
+    --fms-bezel-color: #1a1d24;
+    --fms-screen-bg: #111419;
+    --text-green: #3efc4b; /* Active green for target data */
+    --text-cyan: #2ef2f6;  /* Cyan for standard variables */
+    --text-white: #ffffff;
+    --text-gray: #a6afbc;
+    --text-red: #cc3333;   /* Slightly lower brightness crimson red for nighttime vision protection */
+    --btn-bg: #40444f;     /* Darker grey-silver body of physical FMS buttons */
+    --btn-border: #808898; /* Outer bevel highlight for physical FMS buttons */
+    --btn-active-bg: #4d5262;
+    --btn-gray-text: #ffffff;
+}
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    background-color: var(--bg-color);
+    color: var(--text-white);
+    font-family: 'Share Tech Mono', monospace;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    padding: 0;
+    margin: 0;
+    overflow: hidden; 
+    --scale: 1;
+}
+
+/* FMS Bezel - Locked standard sizes back to prevent scroll/overflow */
+.fms-bezel {
+    background: var(--fms-bezel-color);
+    border: 14px solid #232731;
+    border-radius: 8px;
+    padding: 10px;
+    box-shadow: 0 30px 60px rgba(0, 0, 0, 0.8);
+    width: 580px;
+    height: 740px; 
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    transform: scale(var(--scale));
+    transform-origin: center center;
+}
+
+.fms-screen {
+    background-color: var(--fms-screen-bg);
+    height: 100%;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    padding: 10px 14px; 
+    overflow: hidden;
+    position: relative;
+    border: 2px solid #000000;
+}
+
+/* CRT Scanline styling */
+.fms-screen::after {
+    content: " ";
+    display: block;
+    position: absolute;
+    top: 0; left: 0; bottom: 0; right: 0;
+    background: linear-gradient(rgba(18, 20, 25, 0) 50%, rgba(0, 0, 0, 0.25) 50%);
+    background-size: 100% 3px;
+    pointer-events: none;
+    z-index: 10;
+    opacity: 0.25;
+}
+
+/* Header bar */
+.fms-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-bottom: 2px;
+    margin-bottom: 4px;
+    height: 28px;
+}
+
+.header-left {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    background: #191c24;
+    padding: 2px 6px;
+    border: 1.5px solid #3e4452;
+    border-radius: 4px;
+}
+
+.fms-title {
+    color: var(--text-cyan);
+    font-size: 0.9rem;
+    font-weight: bold;
+}
+
+.arrow-down {
+    font-size: 0.6rem;
+    color: var(--text-gray);
+    margin-left: 2px;
+}
+
+.header-right {
+    font-weight: 700;
+    font-size: 1.05rem;
+    letter-spacing: 0.5px;
+    color: #ffffff;
+}
+
+/* Top Nav menu tab buttons */
+.fms-nav {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 4px;
+    margin-bottom: 8px;
+    height: 32px;
+}
+
+.nav-btn {
+    background-color: var(--btn-bg);
+    border: 2px solid var(--btn-border);
+    color: #cbd5e0;
+    padding: 4px 2px;
+    font-size: 0.75rem;
+    font-family: inherit;
+    font-weight: bold;
+    border-radius: 4px;
+    cursor: pointer;
+    text-align: center;
+    box-shadow: inset 0 1px 3px rgba(255,255,255,0.1);
+}
+
+.nav-btn.active {
+    background-color: #111419;
+    border: 2px solid var(--text-white);
+    color: #ffffff;
+}
+
+/* Title text underneath menu */
+.page-title-bar {
+    background-color: #ffffff;
+    color: #000000;
+    padding: 2px 6px;
+    font-size: 1rem;
+    font-weight: 700;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+    letter-spacing: 0.5px;
+    height: 24px;
+}
+
+.title-right-indicators {
+    display: flex;
+    gap: 2px;
+}
+
+.indicator-box {
+    width: 20px;
+    height: 10px;
+    background-color: #ffffff;
+    border: 1.5px solid #000000;
+}
+
+/* Main inner content grid */
+.fms-content {
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
+    gap: 4px; 
+    height: calc(100% - 64px);
+}
+
+/* Row structure */
+.fms-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+    min-height: 32px; 
+}
+
+.fms-cell {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    width: 100%;
+}
+
+.cell-left, .cell-right {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.fms-label {
+    color: #ffffff;
+    font-size: 0.8rem;
+    font-weight: 700;
+    width: 70px;
+    text-align: right;
+    margin-right: 6px;
+    white-space: nowrap;
+}
+
+.fms-label.label-right {
+    width: auto;
+    text-align: left;
+    margin-left: 6px;
+}
+
+/* Hardware Buttons and Box elements matching the screenshot sizes and bevels */
+.fms-val-box, .fms-btn-grey {
+    background-color: var(--btn-bg);
+    border: 2px solid var(--btn-border);
+    color: #ffffff;
+    border-radius: 4px;
+    font-family: inherit;
+    font-weight: bold;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 28px; 
+    box-shadow: inset 0 1px 3px rgba(255,255,255,0.1), 0 2px 4px rgba(0,0,0,0.5);
+    transition: all 0.1s ease;
+}
+
+.fms-val-box {
+    padding: 1px 6px;
+    cursor: text;
+}
+
+.fms-val-box.extracted-value {
+    border-color: var(--text-green);
+    color: var(--text-green);
+}
+
+.fms-val-box.cyan-text {
+    color: var(--text-cyan);
+}
+
+.fms-val-box.white-text {
+    color: var(--text-white);
+}
+
+.fms-val-box input {
+    background: transparent;
+    border: none;
+    outline: none;
+    color: inherit;
+    font-family: inherit;
+    font-size: 0.95rem; 
+    font-weight: bold;
+    width: 100%;
+    text-align: center;
+}
+
+.fms-btn-grey {
+    padding: 2px 8px;
+    font-size: 0.72rem; 
+    color: #ffffff;
+    cursor: pointer;
+    line-height: 1.1;
+    text-align: center;
+}
+
+.fms-btn-grey:hover {
+    background-color: var(--btn-active-bg);
+}
+
+.divider-line {
+    border: 0;
+    border-top: 1.5px solid #2f3542;
+    margin: 6px 0;
+}
+
+/* Condensed row styling to bring elements closer to the center */
+.fms-row-condensed .fms-cell {
+    padding-left: 55px;
+    padding-right: 55px;
+}
+
+/* First Row proportions */
+.row-flt-nbr .fms-val-box {
+    width: 135px !important;
+}
+.row-flt-nbr .acft-status-btn {
+    width: 110px !important;
+}
+.row-flt-nbr .cpny-request-btn {
+    width: 115px !important;
+}
+
+/* Second Row: FROM/TO/ALTN Airport box sizes */
+.airport-box {
+    width: 70px !important;
+}
+.altn-airport-box {
+    width: 70px !important;
+}
+
+/* Third Row Route selections widths */
+.route-box {
+    width: 140px !important;
+}
+.route-sel-btn {
+    width: 110px !important;
+}
+
+/* Bottom Action Area Layout matching A380 layout exactly */
+.fms-bottom-layout {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 12px;
+    padding-left: 90px; 
+    width: 100%;
+}
+
+.bottom-aligned-row {
+    display: flex;
+    justify-content: flex-start;
+    align-items: center;
+    width: 100%;
+    gap: 30px; 
+}
+
+/* Base style for buttons vertically aligned to green box */
+.align-target-btn {
+    width: 130px !important;
+}
+
+.rte-summary-aligned-btn {
+    width: 130px !important;
+}
+
+.cpny-to-aligned-btn {
+    width: 160px !important;
+    margin-left: auto; 
+    margin-right: 20px;
+    position: relative;
+    left: -8px;
+    top: -5px;
+}
+
+/* Footer MSG LIST Button & layout */
+.fms-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: auto;
+    border-top: 2px solid #2d3748;
+    padding-top: 6px;
+    height: 38px; 
+}
+
+.msg-btn {
+    background-color: var(--btn-bg);
+    color: #ffffff;
+    border: 2px solid var(--btn-border);
+    padding: 2px 8px;
+    font-family: inherit;
+    font-size: 0.72rem;
+    font-weight: bold;
+    border-radius: 4px;
+    cursor: pointer;
+    line-height: 1.1;
+    text-align: center;
+    box-shadow: inset 0 1px 3px rgba(255,255,255,0.1), 0 2px 4px rgba(0,0,0,0.5);
+    height: 28px;
+}
+
+/* FUEL & LOAD Table layout and color customizations */
+.fms-fuel-table {
+    width: 100%;
+    margin-top: 10px;
+    font-size: 0.95rem;
+    line-height: 1.4;
+}
+
+.fuel-table-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 3px 0;
+    width: 100%;
+}
+
+.fuel-table-row.header {
+    border-bottom: 1.5px solid #2d3748;
+    color: var(--text-white);
+    font-weight: bold;
+    padding-bottom: 6px;
+    margin-bottom: 4px;
+}
+
+.fuel-table-row > div:nth-child(1) {
+    width: 120px;
+    text-align: left;
+}
+
+.fuel-table-row > div:nth-child(2) {
+    width: 80px;
+    text-align: center;
+}
+
+.fuel-table-row > div:nth-child(3) {
+    width: 80px;
+    text-align: center;
+}
+
+.fuel-table-row > div:nth-child(4) {
+    width: 180px;
+    text-align: center;
+    display: flex;
+    justify-content: center;
+}
+
+.footer-msg-list {
+    border-top: none;
+    justify-content: flex-start;
+    margin-top: auto;
+    padding-bottom: 2px;
+}
+
+.btn-msg-list, .btn-return {
+    width: 60px;
+    height: 36px;
+    padding: 2px;
+    text-align: center;
+    line-height: 1.1;
+}
+
+.fuel-table-extra-row {
+    align-items: flex-end;
+}
+
+.fuel-table-extra-row > div:nth-child(1) {
+    padding-left: 0;
+}
+
+.extra-value-container {
+    width: 180px;
+    display: flex;
+    flex-direction: column;
+    align-items: center; /* Center horizontally relative to the 11.0 value */
+}
+
+.extra-label-sub {
+    font-size: 0.85rem;
+    color: var(--text-white);
+    font-weight: bold;
+    margin-bottom: 2px;
+    text-align: center;
+    width: 140px;
+}
+
+.extra-sub-headers {
+    display: flex;
+    justify-content: space-between;
+    width: 140px;
+    font-size: 0.72rem;
+    color: var(--text-gray);
+    font-weight: bold;
+    margin-bottom: 2px;
+    padding: 0 4px;
+}
+
+.extra-value-container .extra-inner {
+    width: 140px; /* Match the exact width of dest-min-fuel-box */
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.text-green-fms {
+    color: var(--text-green);
+    font-weight: bold;
+}
+
+.text-white-fms {
+    color: var(--text-white);
+    font-weight: bold;
+}
+
+.text-cyan-fms {
+    color: var(--text-cyan);
+    font-weight: bold;
+}
+
+.text-gray-fms {
+    color: var(--text-gray);
+    font-weight: bold;
+}
+
+.dest-min-fuel-box {
+    color: var(--text-cyan);
+    font-weight: bold;
+    display: inline-block;
+}
+
+/* FMS Tab Styling for DATA/ROUTE page */
+.fms-tabs {
+    display: flex;
+    border-bottom: 1.5px solid #2f3542;
+    margin-bottom: 8px;
+    width: 100%;
+}
+.fms-tab {
+    padding: 6px 12px;
+    font-size: 0.78rem;
+    font-weight: bold;
+    color: var(--text-gray);
+    cursor: pointer;
+    border: 1.5px solid #2f3542;
+    border-bottom: none;
+    border-radius: 4px 4px 0 0;
+    flex: 1;
+    text-align: center;
+    margin-right: -1.5px;
+    background-color: transparent;
+    position: relative;
+    z-index: 1;
+}
+.fms-tab:last-child {
+    margin-right: 0;
+}
+.fms-tab.active {
+    color: var(--text-white);
+    background-color: var(--fms-screen-bg);
+    border: 1.5px solid #ffffff;
+    border-bottom: 2px solid var(--fms-screen-bg);
+    margin-bottom: -2px;
+    z-index: 2;
+}
+
+/* Route Summary Table Styling */
+.rte-summary-table {
+    width: 100%;
+    border: 1.5px solid #2f3542;
+    border-collapse: collapse;
+    font-size: 0.8rem;
+    margin-bottom: 6px;
+    background-color: #12141a;
+}
+.rte-summary-table tr {
+    border-bottom: 1px solid #20242e;
+}
+.rte-summary-table tr:last-child {
+    border-bottom: none;
+}
+.rte-summary-table td {
+    padding: 3px 8px;
+    height: 24px;
+    vertical-align: middle;
+}

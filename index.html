@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>A380 FMS Multi-Function Display</title>
+    <link rel="stylesheet" href="index.css?v=55">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Courier+Prime:ital,wght@0,400;0,700;1,400;1,700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+    <!-- Load PDF.js for clientside PDF parsing -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
+</head>
+<body>
+    <div class="fms-bezel">
+        <div class="fms-screen">
+            <!-- Top Status Bar -->
+            <div class="fms-header">
+                <div class="header-left">
+                    <span class="fms-title active-color">FMS 1</span>
+                    <span class="arrow-down">▼</span>
+                </div>
+                <div class="header-right font-heavy">AAR201</div>
+            </div>
+
+            <!-- Page Selection Navigation -->
+            <div class="fms-nav">
+                <button class="nav-btn active" id="btn-init">ACTIVE <span class="arrow-down">▼</span></button>
+                <button class="nav-btn" id="btn-position">POSITION <span class="arrow-down">▼</span></button>
+                <button class="nav-btn" id="btn-sec">SEC INDEX <span class="arrow-down">▼</span></button>
+                <button class="nav-btn" id="btn-data">DATA <span class="arrow-down">▼</span></button>
+            </div>
+
+            <!-- Subtitle Page Title Area (Indicator boxes removed as requested) -->
+            <div class="page-title-bar">
+                <span id="page-title-text">ACTIVE/INIT</span>
+            </div>
+
+            <!-- Main FMS Content Container -->
+            <div class="fms-content" id="fms-main-content">
+                <!-- Content will be swapped here via JS -->
+            </div>
+
+            <!-- Msg List Footer -->
+            <div class="fms-footer footer-msg-list">
+                <button class="msg-btn btn-msg-list">MSG<br>LIST</button>
+                <div class="fms-progress-container" style="display: none; flex-grow: 1; margin-left: 14px; align-items: center; gap: 8px;">
+                    <div style="font-size: 0.65rem; font-weight: bold; color: var(--text-cyan); white-space: nowrap; width: 62px;">PDF IMPORT:</div>
+                    <div class="progress-bar-bg" style="flex-grow: 1; height: 12px; background-color: #12141a; border: 1.5px solid #2f3542; border-radius: 3px; overflow: hidden; position: relative;">
+                        <div class="progress-bar-fill" style="width: 0%; height: 100%; background-color: var(--text-green); transition: width 0.1s linear;"></div>
+                    </div>
+                    <div class="progress-percent" style="font-size: 0.68rem; color: var(--text-green); font-weight: bold; min-width: 30px; text-align: right;">0%</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+
+    <!-- Hidden file input for PDF import -->
+    <input type="file" id="pdf-file-input" accept="application/pdf" style="display: none;">
+
+    <script src="app.js?v=55"></script>
+</body>
+</html>
