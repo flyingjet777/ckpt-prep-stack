@@ -1671,15 +1671,13 @@ function adjustBezelScale() {
     const winW = window.innerWidth;
     const winH = window.innerHeight;
     
-    let scale = 1;
+    // Calculate scale to fit both width and height perfectly within the viewport
+    let scale = Math.min((winW - padding) / bezelWidth, (winH - padding) / bezelHeight);
     
-    // Check if orientation is Portrait (세로 모드) or Landscape (가로 모드)
-    if (winH > winW) {
-        // 세로모드: 위아래 창 사이즈에 맞춤 (높이 최대화)
-        scale = (winH - padding) / bezelHeight;
-    } else {
-        // 가로모드: 좌우 폭 창 사이즈에 맞춤 (너비 최대화)
-        scale = (winW - padding) / bezelWidth;
+    // Set a minimum scale limit for readability on very small screens (e.g. 0.5)
+    const minScale = 0.5;
+    if (scale < minScale) {
+        scale = minScale;
     }
     
     // Set scale CSS variable on body

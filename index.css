@@ -23,13 +23,12 @@ body {
     background-color: var(--bg-color);
     color: var(--text-white);
     font-family: 'Share Tech Mono', monospace;
-    display: flex;
-    justify-content: center;
-    align-items: center;
+    display: grid;
+    place-items: center;
     min-height: 100vh;
-    padding: 0;
+    padding: 10px;
     margin: 0;
-    overflow: hidden; 
+    overflow: auto; 
     --scale: 1;
 }
 
