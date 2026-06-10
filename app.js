@@ -36,11 +36,16 @@ const flightData = {
 };
 
 // --- Computed Values ---
-const destUtc = '06:12';
-const altnUtc = '06:29';
-const destEfob = (428.8 - 382.4).toFixed(1); // 46.4
-const altnEfob = (46.4 - 9.2).toFixed(1);   // 37.2
-const extraFuel = (46.4 - 11.0).toFixed(1);  // 35.4
+// destUtc is updated from the OFP "ETA ... Z" line on import.
+let destUtc = '06:12';
+let altnUtc = '06:29';
+// EFOB / EXTRA are derived from current flightData so they stay
+// consistent after a PDF import or a manual edit.
+// EFOB DEST = (FOB - TAXI) - TRIP ; EFOB ALTN = EFOB DEST - ALTN ; EXTRA = EFOB DEST - FINAL
+const num = (v) => parseFloat(String(v).replace(/[^\d.\-]/g, '')) || 0;
+const getDestEfob = () => (num(flightData.fob) - num(flightData.taxi) - num(flightData.trip)).toFixed(1);
+const getAltnEfob = () => (parseFloat(getDestEfob()) - num(flightData.altnFuel)).toFixed(1);
+const getExtraFuel = () => (parseFloat(getDestEfob()) - num(flightData.final)).toFixed(1);
 const extraTime = '01:28';
 // --- Route Summary Data ---
 let routeScrollIndex = 0;
@@ -238,7 +243,7 @@ function getFuelTableHTML() {
             <div class="fuel-table-row">
                 <div class="text-white-fms">DEST <span class="text-green-fms">${flightData.to}</span></div>
                 <div class="text-green-fms" style="text-align: center;">${destUtc}</div>
-                <div class="text-green-fms" style="text-align: center;">${destEfob}</div>
+                <div class="text-green-fms" style="text-align: center;">${getDestEfob()}</div>
                 <div>
                     <div class="dest-min-fuel-box">${flightData.final}</div>
                 </div>
@@ -247,7 +252,7 @@ function getFuelTableHTML() {
             <div class="fuel-table-row">
                 <div class="text-white-fms">ALTN <span class="text-green-fms">${flightData.altn}</span></div>
                 <div class="text-green-fms" style="text-align: center;">${altnUtc}</div>
-                <div class="text-cyan-fms" style="text-align: center;">${altnEfob}</div>
+                <div class="text-cyan-fms" style="text-align: center;">${getAltnEfob()}</div>
                 <div></div>
             </div>
 
@@ -272,7 +277,7 @@ function getFuelTableHTML() {
                         <span>TIME</span>
                     </div>
                     <div class="extra-inner">
-                        <span class="text-green-fms">${extraFuel}</span>
+                        <span class="text-green-fms">${getExtraFuel()}</span>
                         <span class="text-green-fms">${extraTime}</span>
                     </div>
                 </div>
@@ -318,15 +323,15 @@ function renderInitPage() {
             <div class="fms-cell" style="justify-content: flex-start; gap: 8px;">
                 <span class="fms-label">FROM</span>
                 <div class="fms-val-box extracted-value airport-box">
-                    <input type="text" value="${flightData.from}">
+                    <input type="text" value="${flightData.from}" data-field="from">
                 </div>
                 <span style="color: var(--text-white); font-weight: bold; font-size: 0.95rem; margin: 0 4px;">TO</span>
                 <div class="fms-val-box extracted-value airport-box">
-                    <input type="text" value="${flightData.to}">
+                    <input type="text" value="${flightData.to}" data-field="to">
                 </div>
                 <span style="color: var(--text-white); font-weight: bold; font-size: 0.95rem; margin: 0 4px;">ALTN</span>
                 <div class="fms-val-box extracted-value altn-airport-box">
-                    <input type="text" value="${flightData.altn}">
+                    <input type="text" value="${flightData.altn}" data-field="altn">
                 </div>
             </div>
         </div>
@@ -336,7 +341,7 @@ function renderInitPage() {
             <div class="fms-cell" style="justify-content: flex-start; gap: 10px;">
                 <span class="fms-label">CPNY RTE</span>
                 <div class="fms-val-box white-text route-box">
-                    <input type="text" value="${flightData.cponyRte}">
+                    <input type="text" value="${flightData.cponyRte}" data-field="cponyRte">
                 </div>
                 <button class="fms-btn-grey route-sel-btn">RTE SEL</button>
             </div>
@@ -347,7 +352,7 @@ function renderInitPage() {
             <div class="fms-cell" style="justify-content: flex-start; gap: 10px;">
                 <span class="fms-label">ALTN RTE</span>
                 <div class="fms-val-box cyan-text route-box">
-                    <input type="text" value="${flightData.altnRte}">
+                    <input type="text" value="${flightData.altnRte}" data-field="altnRte">
                 </div>
                 <button class="fms-btn-grey route-sel-btn" style="color: #cbd5e0;">ALTN RTE SEL</button>
             </div>
@@ -361,13 +366,13 @@ function renderInitPage() {
                 <div class="cell-left" style="gap: 6px;">
                     <span class="fms-label">CRZ FL</span>
                     <div class="fms-val-box extracted-value" style="width: 100px;">
-                        <input type="text" value="${flightData.crzFl}">
+                        <input type="text" value="${flightData.crzFl}" data-field="crzFl">
                     </div>
                 </div>
                 <div class="cell-right" style="gap: 6px;">
                     <span class="fms-label label-right" style="width: 80px; text-align: right;">CRZ TEMP</span>
                     <div class="fms-val-box extracted-value" style="width: 100px;">
-                        <input type="text" value="${flightData.crzTemp}">
+                        <input type="text" value="${flightData.crzTemp}" data-field="crzTemp">
                     </div>
                 </div>
             </div>
@@ -385,7 +390,7 @@ function renderInitPage() {
                 <div class="cell-right" style="gap: 6px;">
                     <span class="fms-label label-right" style="width: 80px; text-align: right;">TROPO</span>
                     <div class="fms-val-box cyan-text" style="width: 110px;">
-                        <input type="text" value="${flightData.tropo}">
+                        <input type="text" value="${flightData.tropo}" data-field="tropo">
                     </div>
                 </div>
             </div>
@@ -397,7 +402,7 @@ function renderInitPage() {
                 <div class="cell-left" style="gap: 6px;">
                     <span class="fms-label">CI</span>
                     <div class="fms-val-box extracted-value" style="width: 72px;">
-                        <input type="text" value="${flightData.ci}">
+                        <input type="text" value="${flightData.ci}" data-field="ci">
                     </div>
                 </div>
                 <div class="cell-right">
@@ -411,7 +416,7 @@ function renderInitPage() {
             <div class="fms-cell" style="justify-content: flex-start; gap: 8px;">
                 <span class="fms-label">TRIP WIND</span>
                 <div class="fms-val-box extracted-value" style="width: 100px;" id="ref-wind-box">
-                    <input type="text" value="${flightData.tripWind}">
+                    <input type="text" value="${flightData.tripWind}" data-field="tripWind">
                 </div>
                 <button class="fms-btn-grey" style="width: 76px;">WIND</button>
             </div>
@@ -443,6 +448,7 @@ function renderInitPage() {
 
     updateHeaderFltNbr();
     
+    const inputFltNbr = document.getElementById('input-flt-nbr');
     if (inputFltNbr) {
         inputFltNbr.addEventListener('input', (e) => {
             flightData.fltNbr = e.target.value;
@@ -1092,7 +1098,7 @@ function renderFuelLoadPage() {
                 <div class="cell-right" style="gap: 6px;">
                     <span class="fms-label label-right" style="width: 80px; text-align: right;">CI</span>
                     <div class="fms-val-box extracted-value" style="width: 100px;">
-                        <input type="text" value="${flightData.ci}">
+                        <input type="text" value="${flightData.ci}" data-field="ci">
                     </div>
                 </div>
             </div>
@@ -1232,6 +1238,15 @@ function renderStepAltsPage() {
 }
 
 // --- Event Listeners (Delegated) ---
+// Persist any edit in a data-field input back into flightData,
+// so values survive page switches and re-renders.
+document.body.addEventListener('input', (e) => {
+    const field = e.target.dataset?.field;
+    if (field && field in flightData) {
+        flightData[field] = e.target.value;
+    }
+});
+
 document.body.addEventListener('click', (e) => {
     // IMPORT button click is now handled natively via <label> for attribute
 
@@ -1254,7 +1269,7 @@ document.body.addEventListener('click', (e) => {
     if (e.target.closest('#btn-return')) {
         resetTitleBar();
         activeMelCdlTab = 'MEL';
-        activeDepArrWxTab = 'WX';
+        activeDepArrWxTab = 'DEP';
         activeEnrteWxTab = 'ALTN';
         renderInitPage();
     }
@@ -1413,26 +1428,77 @@ document.body.addEventListener('click', (e) => {
 renderInitPage();
 
 // --- PDF Import and Parsing Logic ---
+// FMS-style amber alert popup shown when PDF import/parsing fails.
+function showFailAlert(reason) {
+    // Remove any existing alert first
+    document.getElementById('import-fail-alert')?.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'import-fail-alert';
+    overlay.style.cssText = `
+        position: fixed; inset: 0; z-index: 9999;
+        background: rgba(0,0,0,0.65);
+        display: flex; justify-content: center; align-items: center;
+    `;
+
+    const detail = (reason && reason.message) ? reason.message : String(reason || '');
+
+    overlay.innerHTML = `
+        <div style="
+            background: #12141a; border: 2px solid #ffbf00; border-radius: 6px;
+            width: min(420px, 86vw); padding: 22px 24px;
+            font-family: 'Share Tech Mono', 'Courier Prime', monospace;
+            box-shadow: 0 0 30px rgba(255,191,0,0.25);
+        ">
+            <div style="color: #ffbf00; font-size: 1.05rem; font-weight: bold; letter-spacing: 1px; margin-bottom: 12px;">
+                ⚠ PDF IMPORT FAILED
+            </div>
+            <div style="color: #e2e8f0; font-size: 0.85rem; line-height: 1.55; margin-bottom: 6px;">
+                OFP 데이터를 읽지 못했습니다.<br>
+                아래 사항을 확인해 주세요:
+            </div>
+            <ul style="color: #a0aec0; font-size: 0.78rem; line-height: 1.6; margin: 0 0 14px 18px; padding: 0;">
+                <li>Aviator에서 내보낸 OFP PDF가 맞는지</li>
+                <li>텍스트 기반 PDF인지 (스캔 이미지 불가)</li>
+                <li>인터넷 연결 상태 (PDF 엔진 로딩에 필요)</li>
+            </ul>
+            <div style="color: #718096; font-size: 0.68rem; margin-bottom: 16px; word-break: break-all;">
+                ${detail ? 'DETAIL: ' + detail : ''}
+            </div>
+            <div style="text-align: right;">
+                <button id="import-fail-ok" style="
+                    background: #1e2230; border: 1.5px solid #ffbf00; border-radius: 4px;
+                    color: #ffbf00; font-family: inherit; font-size: 0.85rem; font-weight: bold;
+                    padding: 7px 28px; cursor: pointer; letter-spacing: 1px;
+                ">OK</button>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(overlay);
+
+    const close = () => overlay.remove();
+    overlay.querySelector('#import-fail-ok').addEventListener('click', close);
+    overlay.addEventListener('click', (ev) => { if (ev.target === overlay) close(); });
+}
+
 if (typeof pdfjsLib !== 'undefined') {
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
 }
 
-document.addEventListener('change', async (e) => {
-    if (e.target && e.target.id === 'pdf-file-input') {
-        const file = e.target.files[0];
-        if (!file) return;
+document.getElementById('pdf-file-input')?.addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
 
-    // Show temporary status inside FMS bezel
     const pageTitle = document.getElementById('page-title-text');
     if (pageTitle) {
         pageTitle.innerHTML = `<span style="color: var(--text-cyan);">IMPORTING PDF...</span>`;
     }
 
-    // Show and reset progress bar
     const progressContainer = document.querySelector('.fms-progress-container');
     const fillEl = document.querySelector('.progress-bar-fill');
     const percentEl = document.querySelector('.progress-percent');
-    
+
     if (progressContainer && fillEl && percentEl) {
         progressContainer.style.display = 'flex';
         fillEl.style.width = '5%';
@@ -1446,156 +1512,153 @@ document.addEventListener('change', async (e) => {
         }
     };
 
-    // Helper to run simulated progress bar ticks when PDF.js fails to load or parsing fails
-    const runSimulatedProgress = () => {
-        let currentPct = 5;
-        const interval = setInterval(() => {
-            currentPct += Math.floor(Math.random() * 15) + 5;
-            if (currentPct >= 100) {
-                currentPct = 100;
-                clearInterval(interval);
-                setProgress(100);
-                
-                // MOCK Extracted Data Fallback (AAR201 OZ201 OZ747 etc)
-                flightData.fltNbr = "AAR201";
-                flightData.from = "KLAX";
-                flightData.to = "RKSI";
-                flightData.altn = "RKSS";
-                flightData.cponyRte = "KLAXRKSI1";
-                flightData.altnRte = "RKSSRKSI2";
-                flightData.ci = "65";
-                flightData.crzFl = "FL380";
-                flightData.zfw = "785.1";
-                flightData.tropo = "36090";
-                flightData.crzTemp = "-49°C";
-                
-                updateHeaderFltNbr();
-                
-                if (pageTitle) {
-                    pageTitle.innerHTML = `<span style="color: var(--text-green);">IMPORT SUCCESS (SIM)</span>`;
-                }
-                setTimeout(() => {
-                    if (progressContainer) progressContainer.style.display = 'none';
-                    renderInitPage();
-                }, 1200);
-            } else {
-                setProgress(currentPct);
-            }
-        }, 150);
+    // Show a clear, unambiguous failure state.
+    // NOTE: This is a flight-prep aid. Never show fake "success" data —
+    // wrong data that looks real is worse than no data.
+    const showImportFailed = (reason) => {
+        console.error('PDF import failed:', reason);
+        setProgress(100);
+        if (pageTitle) {
+            pageTitle.innerHTML = `<span style="color: #ffbf00;">IMPORT FAILED — CHECK PDF</span>`;
+        }
+        showFailAlert(reason);
+        setTimeout(() => {
+            if (progressContainer) progressContainer.style.display = 'none';
+            if (pageTitle) pageTitle.textContent = 'ACTIVE/INIT';
+        }, 2500);
     };
 
     try {
         if (typeof pdfjsLib === 'undefined') {
-            console.warn("pdfjsLib is not defined. Initiating simulated loader.");
-            runSimulatedProgress();
+            showImportFailed('pdf.js library not loaded (offline or CDN blocked)');
             return;
         }
 
         const arrayBuffer = await file.arrayBuffer();
         setProgress(20);
-        
+
         const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
         setProgress(40);
-        
+
         let fullText = '';
-        const numPages = pdf.numPages;
-        
+        // OFP first-page data lives in the first few pages; the full Aviator
+        // package can be 90+ pages (NOTAM/WX), so cap parsing for speed.
+        const numPages = Math.min(pdf.numPages, 6);
+
         for (let i = 1; i <= numPages; i++) {
             const page = await pdf.getPage(i);
             const textContent = await page.getTextContent();
             const pageText = textContent.items.map(item => item.str).join(' ');
             fullText += pageText + '\n';
-            
-            // Scaled progress between 40% and 85% based on parsed pages
-            const readProgress = Math.round(40 + (i / numPages) * 45);
-            setProgress(readProgress);
+            setProgress(Math.round(40 + (i / numPages) * 45));
         }
 
-        console.log("Parsed PDF Text:", fullText);
+        console.log('Parsed PDF Text:', fullText);
         setProgress(90);
 
-        // --- Extract Values from PDF text using RegEx ---
-        
-        // 1. FLT NBR: e.g. AAR201, OZ201, COA123, etc.
-        const fltMatch = fullText.match(/(?:FLT|FLIGHT|NBR)\s*(?:NBR)?\s*[:\-#]?\s*([A-Z0-9]{3,7})/i) || 
-                         fullText.match(/\b([A-Z]{3}\d{3,4})\b/i);
-        if (fltMatch) {
-            flightData.fltNbr = fltMatch[1].toUpperCase();
-        }
+        // --- Extract values: patterns match the Asiana CFP (OFP page 1) format. ---
+        // Fuel figures on the CFP are in 100 LBS units; convert to klbs (e.g. 0092 -> 9.2).
+        const toKlbs = (s) => (parseInt(s, 10) / 10).toFixed(1);
+        let matchedCount = 0;
 
-        // 2. FROM / TO route: e.g. KLAX/RKSI, KLAX -> RKSI, etc.
-        const routeMatch = fullText.match(/\b([A-Z]{4})\s*(?:\/|→|->|TO)\s*([A-Z]{4})\b/i);
+        // 1. FLT NBR — "FLIGHT RELEASE AAR201"
+        const fltMatch = fullText.match(/FLIGHT\s+RELEASE\s+([A-Z]{2,3}\d{1,4}[A-Z]?)/i) ||
+                         fullText.match(/(?:FLT|FLIGHT)\s*(?:NBR|NO|NUMBER)?\s*[:\-#]?\s*([A-Z]{2,3}\d{1,4})/i);
+        if (fltMatch) { flightData.fltNbr = fltMatch[1].toUpperCase(); matchedCount++; }
+
+        // 2. FROM/TO — "KLAX/RKSI ON 08/JUN/26"
+        const routeMatch = fullText.match(/\b([A-Z]{4})\/([A-Z]{4})\s+ON\b/i) ||
+                           fullText.match(/\b([A-Z]{4})\s*(?:\/|→|->)\s*([A-Z]{4})\b/);
         if (routeMatch) {
             flightData.from = routeMatch[1].toUpperCase();
             flightData.to = routeMatch[2].toUpperCase();
-            flightData.cponyRte = `${flightData.from}${flightData.to}1`;
+            matchedCount++;
         }
 
-        // 3. ALTN: e.g. ALTN RKSS, ALTN: RKSS, etc.
-        const altnMatch = fullText.match(/(?:ALTN|ALTERNATE|ALTRN)\s*[:\-]?\s*\b([A-Z]{4})\b/i);
+        // 3. ALTN — "ALTN/RKSS 0092 00.17"  (also captures ALTN fuel in 100 lbs)
+        const altnMatch = fullText.match(/ALTN\s*\/\s*([A-Z]{4})\s+(\d{4})/i) ||
+                          fullText.match(/(?:ALTN|ALTERNATE)\s*[:\/\-]?\s*([A-Z]{4})\b/i);
         if (altnMatch) {
             flightData.altn = altnMatch[1].toUpperCase();
-            flightData.altnRte = `${flightData.altn}${flightData.to}2`;
+            if (altnMatch[2]) flightData.altnFuel = toKlbs(altnMatch[2]);
+            matchedCount++;
         }
 
-        // 4. Cost Index (CI): e.g. CI 65, COST INDEX 65, etc.
-        const ciMatch = fullText.match(/(?:CI|COST\s*INDEX)\s*[:\-]?\s*(\d{1,3})\b/i);
-        if (ciMatch) {
-            flightData.ci = ciMatch[1];
+        // 4. CI — "CRZ- 65" on the SPEED SKD line (FMS Cost Index)
+        const ciMatch = fullText.match(/CRZ-\s*(\d{1,3})\b/i) ||
+                        fullText.match(/(?:\bCI\b|COST\s*INDEX)\s*[:\-]?\s*(\d{1,3})\b/i);
+        if (ciMatch) { flightData.ci = ciMatch[1]; matchedCount++; }
+
+        // 5. CRZ FL — company rule: 2ND-$ flight level + 2000 ft
+        //    "2ND-$ 280 4031 13.13" -> FL280 + 20 -> FL 300
+        const secondPlanMatch = fullText.match(/2ND-\$\s+(\d{3})\b/i);
+        if (secondPlanMatch) {
+            flightData.crzFl = 'FL ' + (parseInt(secondPlanMatch[1], 10) + 20);
+            matchedCount++;
+        } else {
+            const flMatch = fullText.match(/CRZ\s*FL\s*[:\-]?\s*(\d{3})\b/i);
+            if (flMatch) { flightData.crzFl = 'FL ' + flMatch[1]; matchedCount++; }
         }
 
-        // 5. CRZ FL (Cruise Flight Level): e.g. CRZ FL 380, FL380, CRZ FL: 380
-        const flMatch = fullText.match(/(?:CRZ\s*FL|FLIGHT\s*LEVEL|FL)\s*[:\-]?\s*(\d{3})\b/i);
-        if (flMatch) {
-            flightData.crzFl = 'FL' + flMatch[1];
+        // 6. AVG WIND/TEMP — "M031/M49" (M = minus/headwind, P = plus/tailwind)
+        const windTempMatch = fullText.match(/\b([MP]\d{3})\s*\/\s*([MP]\d{1,2})\b/);
+        if (windTempMatch) {
+            flightData.tripWind = windTempMatch[1].toUpperCase();
+            const t = windTempMatch[2].toUpperCase();
+            flightData.crzTemp = (t.startsWith('M') ? '-' : '+') + t.substring(1) + ' °C';
+            matchedCount++;
         }
 
-        // 6. Zero Fuel Weight (ZFW): e.g. ZFW 785.1, ZFW: 785.1, EZFW 785.1
-        const zfwMatch = fullText.match(/(?:ZFW|EZFW|ZERO\s*FUEL\s*WT)\s*[:\-]?\s*(\d{3}(?:\.\d)?)/i);
-        if (zfwMatch) {
-            flightData.zfw = zfwMatch[1];
+        // 7. APMS — "APMS/P 02.3 PCNT" -> "+2.3 %"  (M = minus)
+        const apmsMatch = fullText.match(/APMS\s*\/\s*([MP])\s*(\d{1,2}\.\d)\s*PCNT/i);
+        if (apmsMatch) {
+            const sign = apmsMatch[1].toUpperCase() === 'M' ? '-' : '+';
+            flightData.apms = sign + parseFloat(apmsMatch[2]) + ' %';
+            matchedCount++;
         }
 
-        // 7. Tropo: e.g. TROPO 34500, TROPO: 34500
-        const tropoMatch = fullText.match(/(?:TROPO|TROPOPAUSE)\s*[:\-]?\s*(\d{5})\b/i);
-        if (tropoMatch) {
-            flightData.tropo = tropoMatch[1];
-        }
+        // 8. ZFW — "ZFW 07851" (100 lbs) -> 785.1 klbs
+        const zfwMatch = fullText.match(/\bZFW\s+(\d{4,5})\b/i);
+        if (zfwMatch) { flightData.zfw = toKlbs(zfwMatch[1]); matchedCount++; }
 
-        // 8. CRZ TEMP / WIND: e.g. M031 / -49C or similar
-        const tempMatch = fullText.match(/(?:TEMP|CRZ\s*TEMP)\s*[:\-]?\s*([MP]?\d{2,3})\b/i);
-        if (tempMatch) {
-            const rawTemp = tempMatch[1].toUpperCase();
-            flightData.crzTemp = rawTemp.startsWith('M') ? `-${rawTemp.substring(1)}°C` : `+${rawTemp}°C`;
+        // 9. Fuels — CONT / TAXI / RAMP OUT (all 100 lbs -> klbs)
+        const contMatch = fullText.match(/(\d)\s*PCT\s*CONT\s+(\d{4})/i);
+        if (contMatch) {
+            flightData.rteRsv = toKlbs(contMatch[2]);
+            flightData.rteRsvPct = contMatch[1] + '.0 %';
+            matchedCount++;
         }
+        const taxiMatch = fullText.match(/\bTAXI\s+(\d{4})\b/i);
+        if (taxiMatch) { flightData.taxi = toKlbs(taxiMatch[1]); matchedCount++; }
+
+        const rampMatch = fullText.match(/RAMP\s*OUT\s+(\d{4})\b/i);
+        if (rampMatch) { flightData.fob = toKlbs(rampMatch[1]); matchedCount++; }
+
+        // 10. ETD/ETA — "ETD KLAX 1710Z ETA RKSI 0612Z"
+        const etaMatch = fullText.match(/ETA\s+[A-Z]{4}\s+(\d{2})(\d{2})Z/i);
+        if (etaMatch) { destUtc = etaMatch[1] + ':' + etaMatch[2]; matchedCount++; }
 
         setProgress(100);
 
-        // Alert user of success inside FMS
-        if (pageTitle) {
-            pageTitle.innerHTML = `<span style="color: var(--text-green);">IMPORT SUCCESS!</span>`;
+        // Require a minimum number of fields — a random PDF must not look "imported".
+        if (matchedCount < 3) {
+            showImportFailed('recognized only ' + matchedCount + ' field(s) — not an OFP?');
+            return;
         }
-        
+
+        if (pageTitle) {
+            pageTitle.innerHTML = `<span style="color: var(--text-green);">IMPORT SUCCESS (${matchedCount} FIELDS)</span>`;
+        }
+
         updateHeaderFltNbr();
-        
-        // Hide progress bar after success delay
+
         setTimeout(() => {
             if (progressContainer) progressContainer.style.display = 'none';
             renderInitPage();
         }, 1200);
 
     } catch (err) {
-        console.error("PDF Parse error, using smart fallback mock:", err);
-        setProgress(100);
-        if (pageTitle) {
-            pageTitle.innerHTML = `<span style="color: var(--text-green);">IMPORT SUCCESS (SIM)</span>`;
-        }
-        updateHeaderFltNbr();
-        setTimeout(() => {
-            if (progressContainer) progressContainer.style.display = 'none';
-            renderInitPage();
-        }, 1200);
-    }
+        showImportFailed(err);
     }
 });
 
