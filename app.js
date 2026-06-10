@@ -1486,9 +1486,11 @@ if (typeof pdfjsLib !== 'undefined') {
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
 }
 
-document.getElementById('pdf-file-input')?.addEventListener('change', async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
+const fileInputEl = document.getElementById('pdf-file-input');
+if (fileInputEl) {
+    fileInputEl.addEventListener('change', async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
 
     const pageTitle = document.getElementById('page-title-text');
     if (pageTitle) {
@@ -1659,6 +1661,7 @@ document.getElementById('pdf-file-input')?.addEventListener('change', async (e) 
         showImportFailed(err);
     }
 });
+}
 
 function adjustBezelScale() {
     const bezelWidth = 580;
