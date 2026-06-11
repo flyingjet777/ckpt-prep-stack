@@ -171,44 +171,79 @@ function parseTafLines(lines, targetDay, targetTime) {
     const [tHour, tMin] = targetTime.split(':').map(Number);
     const targetVal = parseInt(targetDay, 10) * 2400 + tHour * 100 + tMin;
     
-    let candidates = [];
+    // Group lines into airport blocks
+    const blocks = [];
+    let currentBlock = null;
     
-    lines.forEach((line, idx) => {
-        let val = null;
-        
-        // Match FMddhhmm
-        const fmMatch = line.match(/\bFM(\d{2})(\d{2})(\d{2})\b/i);
-        if (fmMatch) {
-            val = parseInt(fmMatch[1], 10) * 2400 + parseInt(fmMatch[2], 10) * 100 + parseInt(fmMatch[3], 10);
-        } else {
-            // Match BECMG ddhh/ddhh or TEMPO ddhh/ddhh
-            const periodMatch = line.match(/\b(?:BECMG|TEMPO)\s+(\d{2})(\d{2})\/(\d{2})(\d{2})\b/i);
-            if (periodMatch) {
-                val = parseInt(periodMatch[1], 10) * 2400 + parseInt(periodMatch[2], 10) * 100;
-            } else {
-                // Match main TAF validity, e.g. ddhh/ddhh
-                const tafMatch = line.match(/\bTAF\s+[A-Z]{4}\s+\d{6}Z\s+(\d{2})(\d{2})\/(\d{2})(\d{2})\b/i);
-                if (tafMatch) {
-                    val = parseInt(tafMatch[1], 10) * 2400 + parseInt(tafMatch[2], 10) * 100;
-                }
+    lines.forEach((lineText) => {
+        const line = lineText.trim();
+        if (line.startsWith('TAF') || line.match(/^[A-Z]{4}\s+\d{6}Z\s+\d{4}\/\d{4}\b/i)) {
+            if (currentBlock) {
+                blocks.push(currentBlock);
             }
+            currentBlock = { lines: [] };
         }
-        
-        if (val !== null && val <= targetVal) {
-            candidates.push({ idx, val });
+        if (!currentBlock) {
+            currentBlock = { lines: [] };
         }
+        currentBlock.lines.push(lineText);
     });
-    
-    let highlightIdx = -1;
-    if (candidates.length > 0) {
-        candidates.sort((a, b) => b.val - a.val);
-        highlightIdx = candidates[0].idx;
+    if (currentBlock) {
+        blocks.push(currentBlock);
     }
     
-    return lines.map((line, idx) => ({
-        text: line,
-        highlight: idx === highlightIdx
-    }));
+    const processedLines = [];
+    
+    blocks.forEach((block, blockIdx) => {
+        const blockLines = block.lines;
+        let candidates = [];
+        
+        blockLines.forEach((line, idx) => {
+            let val = null;
+            
+            // Match FMddhhmm
+            const fmMatch = line.match(/\bFM(\d{2})(\d{2})(\d{2})\b/i);
+            if (fmMatch) {
+                val = parseInt(fmMatch[1], 10) * 2400 + parseInt(fmMatch[2], 10) * 100 + parseInt(fmMatch[3], 10);
+            } else {
+                // Match BECMG ddhh/ddhh or TEMPO ddhh/ddhh
+                const periodMatch = line.match(/\b(?:BECMG|TEMPO)\s+(\d{2})(\d{2})\/(\d{2})(\d{2})\b/i);
+                if (periodMatch) {
+                    val = parseInt(periodMatch[1], 10) * 2400 + parseInt(periodMatch[2], 10) * 100;
+                } else {
+                    // Match main TAF validity, e.g. ddhh/ddhh
+                    const tafMatch = line.match(/\b(?:TAF\s+)?(?:[A-Z]{4}\s+\d{6}Z\s+)?(\d{2})(\d{2})\/(\d{2})(\d{2})\b/i);
+                    if (tafMatch) {
+                        val = parseInt(tafMatch[1], 10) * 2400 + parseInt(tafMatch[2], 10) * 100;
+                    }
+                }
+            }
+            
+            if (val !== null && val <= targetVal) {
+                candidates.push({ idx, val });
+            }
+        });
+        
+        let highlightIdx = -1;
+        if (candidates.length > 0) {
+            candidates.sort((a, b) => b.val - a.val);
+            highlightIdx = candidates[0].idx;
+        }
+        
+        // Add blank line separation between airport blocks
+        if (blockIdx > 0) {
+            processedLines.push({ isBlank: true, text: '', highlight: false });
+        }
+        
+        blockLines.forEach((line, idx) => {
+            processedLines.push({
+                text: line,
+                highlight: idx === highlightIdx
+            });
+        });
+    });
+    
+    return processedLines;
 }
 
 function getAirportLongitude(icao) {
@@ -630,44 +665,27 @@ function parseStepAlts(routeStr, fromAirport, fullText) {
 }
 
 function extractTurbulenceZones(wpts) {
-    let greenZones = [];
-    let redZones = [];
-    
-    let currentGreen = [];
-    let currentRed = [];
+    let zones = [];
+    let currentZone = [];
     
     for (let i = 0; i < wpts.length; i++) {
         const pt = wpts[i];
         const sr = parseInt(pt.sr, 10);
         
-        if (sr >= 4 && sr <= 6) {
-            currentGreen.push(pt);
-            if (currentRed.length > 0) {
-                redZones.push(currentRed);
-                currentRed = [];
-            }
-        } else if (sr >= 7) {
-            currentRed.push(pt);
-            if (currentGreen.length > 0) {
-                greenZones.push(currentGreen);
-                currentGreen = [];
-            }
+        if (sr >= 4) {
+            currentZone.push(pt);
         } else {
-            if (currentGreen.length > 0) {
-                greenZones.push(currentGreen);
-                currentGreen = [];
-            }
-            if (currentRed.length > 0) {
-                redZones.push(currentRed);
-                currentRed = [];
+            if (currentZone.length > 0) {
+                zones.push(currentZone);
+                currentZone = [];
             }
         }
     }
-    if (currentGreen.length > 0) greenZones.push(currentGreen);
-    if (currentRed.length > 0) redZones.push(currentRed);
+    if (currentZone.length > 0) {
+        zones.push(currentZone);
+    }
     
-    const formatZone = (zone, color) => {
-        if (zone.length === 0) return null;
+    const formattedZones = zones.map(zone => {
         const startPt = zone[0];
         const endPt = zone[zone.length - 1];
         
@@ -675,6 +693,9 @@ function extractTurbulenceZones(wpts) {
         const minSr = Math.min(...srs);
         const maxSr = Math.max(...srs);
         const srStr = minSr === maxSr ? String(minSr).padStart(2, '0') : `${String(minSr).padStart(2, '0')}-${String(maxSr).padStart(2, '0')}`;
+        
+        const hasRed = srs.some(s => s >= 7);
+        const color = hasRed ? 'var(--text-red)' : 'var(--text-green)';
         
         const formatActm = (actmStr) => {
             return actmStr.replace('.', '+');
@@ -691,15 +712,9 @@ function extractTurbulenceZones(wpts) {
             time: actmStr,
             color
         };
-    };
+    });
     
-    greenZones.sort((a, b) => b.length - a.length);
-    redZones.sort((a, b) => b.length - a.length);
-    
-    return {
-        green: greenZones.length > 0 ? formatZone(greenZones[0], 'var(--text-green)') : null,
-        red: redZones.length > 0 ? formatZone(redZones[0], 'var(--text-red)') : null
-    };
+    return formattedZones;
 }
 
 function extractWeatherSection(fullText, headerName) {
@@ -1068,9 +1083,9 @@ function renderInitPage() {
                         <input type="text" value="${flightData.acftReg}" data-field="acftReg" style="width: 100%;">
                     </div>
                 </div>
-                <div class="cell-right" style="gap: 6px;">
-                    <button class="fms-btn-grey acft-status-btn" style="border-color: var(--text-green); color: var(--text-green);">APMS ${flightData.apms.replace(' %', '')}</button>
-                    <label for="pdf-file-input" class="fms-btn-grey cpny-request-btn" style="border-color: var(--text-cyan); color: var(--text-cyan); font-size: 0.9rem; font-weight: bold; display: flex; justify-content: center; align-items: center; cursor: pointer; box-sizing: border-box;">IMPORT</label>
+                <div class="cell-right" style="gap: 6px; display: flex; flex-direction: column; align-items: flex-end;">
+                    <label for="pdf-file-input" class="fms-btn-grey cpny-request-btn" style="border-color: var(--text-cyan); color: var(--text-cyan); font-size: 0.9rem; font-weight: bold; display: flex; justify-content: center; align-items: center; cursor: pointer; box-sizing: border-box; margin-bottom: 4px;">IMPORT</label>
+                    <button class="fms-btn-grey acft-status-btn" style="border-color: var(--text-green); color: var(--text-green); width: 100%; text-align: center;">APMS ${flightData.apms.replace(' %', '')}</button>
                 </div>
             </div>
         </div>
@@ -1989,52 +2004,49 @@ function renderStepAltsPage() {
 
     const initialFL = stepAltData[0] ? stepAltData[0].alt.replace('FL', '') : (flightData.crzFl || '350');
 
-    const greenZone = flightData.turbZones && flightData.turbZones.green;
-    const redZone = flightData.turbZones && flightData.turbZones.red;
+    const zones = flightData.turbZones || [];
     
-    const greenHTML = greenZone ? `
-        <div style="color: #ffffff;">
-            AT <span style="color: var(--text-green);">${greenZone.label}</span>
-        </div>
-        <div style="color: #ffffff;">
-            SR <span style="color: var(--text-green);">${greenZone.sr}</span>
-        </div>
-        <div style="color: #ffffff; margin-right: 5px;">
-            TIME AFTER DEP <span style="color: var(--text-green);">${greenZone.time}</span>
-        </div>
-    ` : `
-        <div style="color: #ffffff;">
-            AT <span style="color: var(--text-green);">ETP2 / ASTER</span>
-        </div>
-        <div style="color: #ffffff;">
-            SR <span style="color: var(--text-green);">04-05</span>
-        </div>
-        <div style="color: #ffffff; margin-right: 5px;">
-            TIME AFTER DEP <span style="color: var(--text-green);">07+59 / 10+28</span>
-        </div>
-    `;
-
-    const redHTML = redZone ? `
-        <div style="color: #ffffff;">
-            AT <span style="color: var(--text-red);">${redZone.label}</span>
-        </div>
-        <div style="color: #ffffff;">
-            SR <span style="color: var(--text-red);">${redZone.sr}</span>
-        </div>
-        <div style="color: #ffffff; margin-right: 5px;">
-            TIME AFTER DEP <span style="color: var(--text-red);">${redZone.time}</span>
-        </div>
-    ` : `
-        <div style="color: #ffffff;">
-            AT <span style="color: var(--text-red);">SDE / GTC</span>
-        </div>
-        <div style="color: #ffffff;">
-            SR <span style="color: var(--text-red);">08</span>
-        </div>
-        <div style="color: #ffffff; margin-right: 5px;">
-            TIME AFTER DEP <span style="color: var(--text-red);">10+44 / 10+58</span>
-        </div>
-    `;
+    let zonesHTML = '';
+    if (zones.length > 0) {
+        zonesHTML = zones.map(z => `
+            <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                <div style="color: #ffffff;">
+                    AT <span style="color: ${z.color};">${z.label}</span>
+                </div>
+                <div style="color: #ffffff;">
+                    SR <span style="color: ${z.color};">${z.sr}</span>
+                </div>
+                <div style="color: #ffffff; margin-right: 5px;">
+                    TIME AFTER DEP <span style="color: ${z.color};">${z.time}</span>
+                </div>
+            </div>
+        `).join('');
+    } else {
+        zonesHTML = `
+            <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                <div style="color: #ffffff;">
+                    AT <span style="color: var(--text-green);">ETP2 / ASTER</span>
+                </div>
+                <div style="color: #ffffff;">
+                    SR <span style="color: var(--text-green);">04-05</span>
+                </div>
+                <div style="color: #ffffff; margin-right: 5px;">
+                    TIME AFTER DEP <span style="color: var(--text-green);">07+59 / 10+28</span>
+                </div>
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                <div style="color: #ffffff;">
+                    AT <span style="color: var(--text-red);">SDE / GTC</span>
+                </div>
+                <div style="color: #ffffff;">
+                    SR <span style="color: var(--text-red);">08</span>
+                </div>
+                <div style="color: #ffffff; margin-right: 5px;">
+                    TIME AFTER DEP <span style="color: var(--text-red);">10+44 / 10+58</span>
+                </div>
+            </div>
+        `;
+    }
 
     mainContent.innerHTML = `
         <!-- Folder Tabs -->
@@ -2067,15 +2079,8 @@ function renderStepAltsPage() {
         <!-- Max SR/Turb Point Box -->
         <div style="border: 1.5px solid #2f3542; border-radius: 4px; padding: 10px; position: relative; margin-top: 6px; margin-bottom: 6px; background-color: #12141a;">
             <span style="position: absolute; top: -8px; left: 10px; background-color: var(--fms-screen-bg); padding: 0 6px; font-size: 0.65rem; color: var(--text-gray); font-weight: bold; letter-spacing: 0.5px;">MAX SR/TURB POINT</span>
-            <div style="display: flex; flex-direction: column; gap: 6px; font-size: 0.72rem; font-weight: bold;">
-                <!-- Line 1: LTM Caution Zone -->
-                <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
-                    ${greenHTML}
-                </div>
-                <!-- Line 2: MOD Caution Zone -->
-                <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
-                    ${redHTML}
-                </div>
+            <div style="display: flex; flex-direction: column; gap: 6px; font-size: 0.72rem; font-weight: bold; max-height: 80px; overflow-y: auto; padding-right: 4px;">
+                ${zonesHTML}
             </div>
         </div>
 
@@ -2789,6 +2794,12 @@ function adjustBezelScale() {
 
 // Attach listeners for scaling and panels
 window.addEventListener('resize', adjustBezelScale);
+window.addEventListener('pageshow', adjustBezelScale);
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+        adjustBezelScale();
+    }
+});
 window.addEventListener('DOMContentLoaded', () => {
     adjustBezelScale();
     updateDebugPanel();
@@ -2798,3 +2809,4 @@ updateDebugPanel();
 // Run a small delay to handle iPad Safari layout quirks on load
 setTimeout(adjustBezelScale, 100);
 setTimeout(adjustBezelScale, 500);
+setTimeout(adjustBezelScale, 1500);
