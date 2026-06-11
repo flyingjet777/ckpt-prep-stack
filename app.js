@@ -35,8 +35,8 @@ const flightData = {
     tow: '',  
     lw: '',
     fod: '',
-    ccf: '',
-    tank: ''
+    tank: '',
+    acftReg: ''
 };
 
 // Keep track of raw values parsed from PDF
@@ -48,6 +48,7 @@ function resetFlightData() {
         else if (key === 'tropo') flightData[key] = '36090 FT';
         else flightData[key] = '';
     }
+    melCdlData = [];
 }
 
 // --- Computed Values ---
@@ -209,11 +210,7 @@ let stepAltScrollIndex = 0;
 // --- MEL/CDL Data ---
 let melCdlScrollIndex = 0;
 let activeMelCdlTab = 'MEL'; // 'MEL' or 'CREW'
-const melCdlData = [
-    { type: 'MEL', num: '33-20-10A', desc: 'LU43 (UL2) SIDE CEILING LIGHT OUT' },
-    { type: 'MEL', num: '50-10-05A', desc: 'FWD CGO ANTI ROLL OUT LATCH DAMAGED(5085' },
-    { type: 'CDL', num: '27-22', desc: 'R/H OUTER FLAP-OUTER END SEAL PARTIALLY' }
-];
+let melCdlData = [];
 
 // --- Weather Data ---
 let depArrWxScrollIndex = 0;
@@ -427,7 +424,13 @@ function renderInitPage() {
                 <div class="cell-left" style="gap: 6px;">
                     <span class="fms-label">FLT NBR</span>
                     <div class="fms-val-box extracted-value">
-                        <input type="text" value="${flightData.fltNbr}" id="input-flt-nbr">
+                        <input type="text" value="${flightData.fltNbr}" id="input-flt-nbr" style="width: 70px;">
+                    </div>
+                </div>
+                <div class="cell-left" style="gap: 6px; margin-left: 10px;">
+                    <span class="fms-label">ACFT</span>
+                    <div class="fms-val-box extracted-value">
+                        <input type="text" value="${flightData.acftReg}" data-field="acftReg" style="width: 70px;">
                     </div>
                 </div>
                 <div class="cell-right" style="gap: 10px;">
@@ -1864,7 +1867,26 @@ if (fileInputEl) {
             matchedCount++;
         }
 
-        // 15. ETD/ETA — "ETD KLAX 1710Z ETA RKSI 0612Z"
+        // 16. ACFT REG (HL Number)
+        const regMatch = fullText.match(/\b(HL\d{4})\b/i);
+        if (regMatch) {
+            flightData.acftReg = regMatch[1].toUpperCase();
+            matchedCount++;
+        }
+
+        // 17. MEL / CDL items
+        const melRegex = /\-\s*(MEL|CDL)\s+([A-Z0-9\-]+)\s*:\s*(.*?)(?=\s*\-\s*(?:MEL|CDL)|\s*\d+\.\s*[A-Z]|$)/gi;
+        let m;
+        while ((m = melRegex.exec(fullText)) !== null) {
+            melCdlData.push({
+                type: m[1].toUpperCase(),
+                num: m[2],
+                desc: m[3].trim()
+            });
+            matchedCount++;
+        }
+
+        // 18. ETD/ETA — "ETD KLAX 1710Z ETA RKSI 0612Z"
         const etaMatch = fullText.match(/ETA\s+[A-Z]{4}\s+(\d{2})(\d{2})Z/i);
         if (etaMatch) { destUtc = etaMatch[1] + ':' + etaMatch[2]; matchedCount++; }
 
