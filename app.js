@@ -546,6 +546,40 @@ function parseFlightPlanRoute(routeStr) {
     return routePairs;
 }
 
+function parseStepAlts(routeStr, fromAirport) {
+    let tokens = routeStr.split(/\s+/).filter(t => t.length > 0);
+    let initialFL = 'FL350';
+    if (tokens.length > 0 && tokens[0].match(/^\-[NKM]\d{3,4}[FSAM]\d{3,4}/)) {
+        const match = tokens[0].match(/^\-[NKM]\d{3,4}([FSAM])(\d{3,4})/);
+        if (match) {
+            initialFL = 'FL' + match[2];
+        }
+    }
+    const steps = [];
+    steps.push({
+        wpt: fromAirport || '----',
+        alt: initialFL,
+        dist: '---',
+        time: '---'
+    });
+    for (let i = 0; i < tokens.length; i++) {
+        const token = tokens[i];
+        const match = token.match(/^([A-Z0-9]+)\/[NKM]\d{3,4}([FSAM])(\d{3,4})/i);
+        if (match) {
+            steps.push({
+                wpt: match[1].toUpperCase(),
+                alt: 'FL' + match[3],
+                dist: '---',
+                time: '---'
+            });
+        }
+    }
+    if (steps.length === 1) {
+        steps.push({ wpt: '--------', alt: '---', dist: '', time: '' });
+    }
+    return steps;
+}
+
 function extractWeatherSection(fullText, headerName) {
     const headerIdx = fullText.toUpperCase().indexOf(headerName.toUpperCase());
     if (headerIdx === -1) return [];
@@ -1831,6 +1865,8 @@ function renderStepAltsPage() {
     `;
     btnInit.classList.remove('active');
 
+    const initialFL = stepAltData[0] ? stepAltData[0].alt.replace('FL', '') : (flightData.crzFl || '350');
+
     mainContent.innerHTML = `
         <!-- Folder Tabs -->
         <div class="fms-tabs" style="margin-bottom: 6px;">
@@ -1844,7 +1880,7 @@ function renderStepAltsPage() {
         <!-- Table Container matching the reference image layout -->
         <div class="step-alt-table-container" style="border: 1.5px solid #2f3542; border-radius: 4px; padding: 8px 10px; background-color: #12141a; margin-bottom: 4px;">
             <div style="font-size: 0.82rem; margin-bottom: 6px; font-weight: bold; color: #ffffff;">
-                STEP ALTs FROM CRZ <span style="color: var(--text-cyan);">FL</span> <span style="color: var(--text-green);">300</span>
+                STEP ALTs FROM CRZ <span style="color: var(--text-cyan);">FL</span> <span style="color: var(--text-green);">${initialFL}</span>
             </div>
 
             <!-- Table Grid -->
@@ -2478,6 +2514,10 @@ if (fileInputEl) {
             }
             if (routeStr) {
                 routeData = parseFlightPlanRoute(routeStr);
+                const parsedSteps = parseStepAlts(routeStr, flightData.from);
+                stepAltData.length = 0;
+                parsedSteps.forEach(step => stepAltData.push(step));
+                stepAltScrollIndex = 0;
                 matchedCount++;
             }
         }
