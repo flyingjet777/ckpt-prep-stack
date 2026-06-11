@@ -1083,7 +1083,7 @@ function renderInitPage() {
                         <input type="text" value="${flightData.acftReg}" data-field="acftReg" style="width: 100%;">
                     </div>
                 </div>
-                <div class="cell-right" style="gap: 6px; display: flex; flex-direction: column; align-items: flex-end; margin-top: 10px;">
+                <div class="cell-right" style="gap: 6px; display: flex; flex-direction: column; align-items: flex-end; margin-top: 14px;">
                     <label for="pdf-file-input" class="fms-btn-grey cpny-request-btn" style="border-color: var(--text-cyan); color: var(--text-cyan); font-size: 0.9rem; font-weight: bold; display: flex; justify-content: center; align-items: center; cursor: pointer; box-sizing: border-box; margin-bottom: 4px;">IMPORT</label>
                     <button class="fms-btn-grey acft-status-btn" style="border-color: var(--text-green); color: var(--text-green); width: 100%; text-align: center;">APMS ${flightData.apms.replace(' %', '')}</button>
                 </div>
@@ -1516,14 +1516,16 @@ function getProcessedEnrteWxData() {
     let allowedIcaos = null;
     
     if (activeEnrteWxTab === 'ALTN') {
-        rawLines = flightData.altnWeatherRaw && flightData.altnWeatherRaw.length > 0
-            ? flightData.altnWeatherRaw
-            : alternateWxData.map(d => d.text);
+        if (!flightData.altnWeatherRaw || flightData.altnWeatherRaw.length === 0) {
+            return [];
+        }
+        rawLines = flightData.altnWeatherRaw;
         windowHours = 1.0;
     } else {
-        rawLines = flightData.enrteWeatherRaw && flightData.enrteWeatherRaw.length > 0
-            ? flightData.enrteWeatherRaw
-            : enrouteWxDataList.map(d => d.text);
+        if (!flightData.enrteWeatherRaw || flightData.enrteWeatherRaw.length === 0) {
+            return [];
+        }
+        rawLines = flightData.enrteWeatherRaw;
         windowHours = 3.0;
         allowedIcaos = [
             'PANC', 'PACD', 
@@ -1554,15 +1556,25 @@ function getDepArrWxTableHTML() {
     let targetTime = '';
     
     if (activeDepArrWxTab === 'DEP') {
-        rawLines = flightData.depWeatherRaw && flightData.depWeatherRaw.length > 0
-            ? flightData.depWeatherRaw
-            : klaxTafData.map(d => d.text);
+        if (!flightData.depWeatherRaw || flightData.depWeatherRaw.length === 0) {
+            // Return empty lines placeholder
+            for (let i = 0; i < 13; i++) {
+                html += `<tr style="height: 24px;"><td style="padding: 2px 4px;"></td></tr>`;
+            }
+            return html;
+        }
+        rawLines = flightData.depWeatherRaw;
         targetDay = flightData.flightDay || '08';
         targetTime = flightData.etd || '17:10';
     } else {
-        rawLines = flightData.arrWeatherRaw && flightData.arrWeatherRaw.length > 0
-            ? flightData.arrWeatherRaw
-            : rksiTafData.map(d => d.text);
+        if (!flightData.arrWeatherRaw || flightData.arrWeatherRaw.length === 0) {
+            // Return empty lines placeholder
+            for (let i = 0; i < 13; i++) {
+                html += `<tr style="height: 24px;"><td style="padding: 2px 4px;"></td></tr>`;
+            }
+            return html;
+        }
+        rawLines = flightData.arrWeatherRaw;
         
         const depDay = flightData.flightDay || '08';
         const depTime = flightData.etd || '17:10';
