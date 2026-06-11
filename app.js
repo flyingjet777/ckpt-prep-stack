@@ -36,7 +36,14 @@ const flightData = {
     lw: '',
     fod: '',
     tank: '',
-    acftReg: ''
+    acftReg: '',
+    etd: '',
+    eta: '',
+    flightDay: '',
+    depWeatherRaw: [],
+    arrWeatherRaw: [],
+    altnWeatherRaw: [],
+    enrteWeatherRaw: []
 };
 
 // Keep track of raw values parsed from PDF
@@ -85,6 +92,113 @@ const getDestEfob = () => {
 const getAltnEfob = () => (parseFloat(getDestEfob()) - num(flightData.altnFuel)).toFixed(1);
 const getExtraFuel = () => (parseFloat(getDestEfob()) - num(flightData.final)).toFixed(1);
 const extraTime = '01:28';
+
+// Timezone offset, local time, and weather extractors
+function getAirportOffset(icao) {
+    if (!icao) return 0;
+    const code = icao.toUpperCase();
+    if (code === 'RKSI' || code === 'RKSS') return 9;
+    if (code === 'KLAX') return -7;
+    if (code === 'KJFK') return -4;
+    return 0; // Default to UTC
+}
+
+function getLocalTimeStr(utcTimeStr, offset) {
+    if (!utcTimeStr) return '';
+    const [h, m] = utcTimeStr.split(':').map(Number);
+    if (isNaN(h) || isNaN(m)) return '';
+    let localHours = (h + offset) % 24;
+    if (localHours < 0) localHours += 24;
+    return String(localHours).padStart(2, '0') + ':' + String(m).padStart(2, '0') + ' L';
+}
+
+function getArrivalDay(depDay, depTime, arrTime) {
+    if (!depDay || !depTime || !arrTime) return depDay;
+    const [depH, depM] = depTime.split(':').map(Number);
+    const [arrH, arrM] = arrTime.split(':').map(Number);
+    let arrDay = parseInt(depDay, 10);
+    if (arrH < depH || (arrH === depH && arrM < depM)) {
+        arrDay += 1;
+    }
+    return String(arrDay).padStart(2, '0');
+}
+
+function parseTafLines(lines, targetDay, targetTime) {
+    if (!targetDay || !targetTime) {
+        return lines.map(line => ({ text: line, highlight: false }));
+    }
+    
+    const [tHour, tMin] = targetTime.split(':').map(Number);
+    const targetVal = parseInt(targetDay, 10) * 2400 + tHour * 100 + tMin;
+    
+    let candidates = [];
+    
+    lines.forEach((line, idx) => {
+        let val = null;
+        
+        // Match FMddhhmm
+        const fmMatch = line.match(/\bFM(\d{2})(\d{2})(\d{2})\b/i);
+        if (fmMatch) {
+            val = parseInt(fmMatch[1], 10) * 2400 + parseInt(fmMatch[2], 10) * 100 + parseInt(fmMatch[3], 10);
+        } else {
+            // Match BECMG ddhh/ddhh or TEMPO ddhh/ddhh
+            const periodMatch = line.match(/\b(?:BECMG|TEMPO)\s+(\d{2})(\d{2})\/(\d{2})(\d{2})\b/i);
+            if (periodMatch) {
+                val = parseInt(periodMatch[1], 10) * 2400 + parseInt(periodMatch[2], 10) * 100;
+            } else {
+                // Match main TAF validity, e.g. ddhh/ddhh
+                const tafMatch = line.match(/\bTAF\s+[A-Z]{4}\s+\d{6}Z\s+(\d{2})(\d{2})\/(\d{2})(\d{2})\b/i);
+                if (tafMatch) {
+                    val = parseInt(tafMatch[1], 10) * 2400 + parseInt(tafMatch[2], 10) * 100;
+                }
+            }
+        }
+        
+        if (val !== null && val <= targetVal) {
+            candidates.push({ idx, val });
+        }
+    });
+    
+    let highlightIdx = -1;
+    if (candidates.length > 0) {
+        candidates.sort((a, b) => b.val - a.val);
+        highlightIdx = candidates[0].idx;
+    }
+    
+    return lines.map((line, idx) => ({
+        text: line,
+        highlight: idx === highlightIdx
+    }));
+}
+
+function extractWeatherSection(fullText, headerName) {
+    const headerIdx = fullText.toUpperCase().indexOf(headerName.toUpperCase());
+    if (headerIdx === -1) return [];
+    
+    const remainingText = fullText.substring(headerIdx + headerName.length);
+    const firstDividerIdx = remainingText.indexOf('---------------------');
+    if (firstDividerIdx === -1) return [];
+    
+    const weatherText = remainingText.substring(firstDividerIdx + '---------------------'.length);
+    
+    const lines = [];
+    const rawLines = weatherText.split('\n');
+    for (let i = 0; i < rawLines.length; i++) {
+        const line = rawLines[i].trim();
+        if (line === '---------------------') {
+            break;
+        }
+        if (headerName.toUpperCase() === 'ENROUTE WEATHER') {
+            if (line.match(/^Page\s+\d+/i) || line.toLowerCase().includes('win te') || line.toLowerCase().includes('plan valid')) {
+                break;
+            }
+        }
+        if (line.length > 0) {
+            lines.push(line);
+        }
+    }
+    return lines;
+}
 
 function recalculateWeights() {
     const zfw = num(flightData.zfw);
@@ -861,10 +975,28 @@ function formatTafLine(item) {
 }
 
 function getProcessedEnrteWxData() {
-    const rawData = activeEnrteWxTab === 'ALTN' ? alternateWxData : enrouteWxDataList;
+    let rawLines = [];
+    if (activeEnrteWxTab === 'ALTN') {
+        rawLines = flightData.altnWeatherRaw && flightData.altnWeatherRaw.length > 0
+            ? flightData.altnWeatherRaw
+            : alternateWxData.map(d => d.text);
+    } else {
+        rawLines = flightData.enrteWeatherRaw && flightData.enrteWeatherRaw.length > 0
+            ? flightData.enrteWeatherRaw
+            : enrouteWxDataList.map(d => d.text);
+    }
+    
+    const depDay = flightData.flightDay || '08';
+    const depTime = flightData.etd || '17:10';
+    const arrTime = flightData.eta || '06:12';
+    const targetDay = getArrivalDay(depDay, depTime, arrTime);
+    const targetTime = arrTime;
+    
+    const highlightedData = parseTafLines(rawLines, targetDay, targetTime);
+    
     const tafData = [];
-    for (let i = 0; i < rawData.length; i++) {
-        const item = rawData[i];
+    for (let i = 0; i < highlightedData.length; i++) {
+        const item = highlightedData[i];
         if (item.text.startsWith('TAF') && i > 0) {
             tafData.push({ isBlank: true });
         }
@@ -875,7 +1007,29 @@ function getProcessedEnrteWxData() {
 
 function getDepArrWxTableHTML() {
     let html = '';
-    const tafData = activeDepArrWxTab === 'DEP' ? klaxTafData : rksiTafData;
+    let rawLines = [];
+    let targetDay = '';
+    let targetTime = '';
+    
+    if (activeDepArrWxTab === 'DEP') {
+        rawLines = flightData.depWeatherRaw && flightData.depWeatherRaw.length > 0
+            ? flightData.depWeatherRaw
+            : klaxTafData.map(d => d.text);
+        targetDay = flightData.flightDay || '08';
+        targetTime = flightData.etd || '17:10';
+    } else {
+        rawLines = flightData.arrWeatherRaw && flightData.arrWeatherRaw.length > 0
+            ? flightData.arrWeatherRaw
+            : rksiTafData.map(d => d.text);
+        
+        const depDay = flightData.flightDay || '08';
+        const depTime = flightData.etd || '17:10';
+        const arrTime = flightData.eta || '06:12';
+        targetDay = getArrivalDay(depDay, depTime, arrTime);
+        targetTime = arrTime;
+    }
+    
+    const tafData = parseTafLines(rawLines, targetDay, targetTime);
 
     for (let i = 0; i < 13; i++) {
         const item = tafData[i];
@@ -954,7 +1108,7 @@ function renderDepArrWxPage() {
                 <div class="cell-left" style="gap: 10px; align-items: center;">
                     <span class="fms-label" style="width: auto; margin-right: 0;">FLT NUMBER</span>
                     <div class="fms-val-box cyan-text" style="width: 140px; justify-content: space-between;">
-                        <span>AAR201</span><span class="arrow-down">▼</span>
+                        <span>${flightData.fltNbr || 'AAR201'}</span><span class="arrow-down">▼</span>
                     </div>
                 </div>
                 <div class="cell-right" style="gap: 12px; align-items: center;">
@@ -971,9 +1125,17 @@ function renderDepArrWxPage() {
         <div class="fms-row" style="margin-bottom: 4px;">
             <div class="fms-cell" style="justify-content: flex-start; gap: 8px; font-size: 0.9rem;">
                 <span class="text-white-fms">${isDepActive ? 'ETD' : 'ETA'}</span>
-                <span class="text-green-fms" style="font-weight: bold; margin-right: 15px;">${isDepActive ? '1710Z' : '0612Z'}</span>
+                <span class="text-green-fms" style="font-weight: bold; margin-right: 15px;">
+                    ${isDepActive 
+                        ? (flightData.etd ? flightData.etd.replace(':', '') + 'Z' : '1710Z') 
+                        : (flightData.eta ? flightData.eta.replace(':', '') + 'Z' : '0612Z')}
+                </span>
                 <span class="text-white-fms">LOCAL</span>
-                <span style="color: var(--text-green); font-weight: bold;">${isDepActive ? '10:10 L' : '15:12 L'}</span>
+                <span style="color: var(--text-green); font-weight: bold;">
+                    ${isDepActive 
+                        ? getLocalTimeStr(flightData.etd || '17:10', getAirportOffset(flightData.from || 'KLAX')) 
+                        : getLocalTimeStr(flightData.eta || '06:12', getAirportOffset(flightData.to || 'RKSI'))}
+                </span>
             </div>
         </div>
 
@@ -1017,7 +1179,7 @@ function renderEnrteWxPage() {
                 <div class="cell-left" style="gap: 10px; align-items: center;">
                     <span class="fms-label" style="width: auto; margin-right: 0;">FLT NUMBER</span>
                     <div class="fms-val-box cyan-text" style="width: 140px; justify-content: space-between;">
-                        <span>AAR201</span><span class="arrow-down">▼</span>
+                        <span>${flightData.fltNbr || 'AAR201'}</span><span class="arrow-down">▼</span>
                     </div>
                 </div>
                 <div class="cell-right" style="gap: 12px; align-items: center;">
@@ -1034,9 +1196,17 @@ function renderEnrteWxPage() {
         <div class="fms-row" style="margin-bottom: 4px;">
             <div class="fms-cell" style="justify-content: flex-start; gap: 8px; font-size: 0.9rem;">
                 <span class="text-white-fms">${isAltnActive ? 'ETD' : 'ETA'}</span>
-                <span class="text-green-fms" style="font-weight: bold; margin-right: 15px;">${isAltnActive ? '1710Z' : '0612Z'}</span>
+                <span class="text-green-fms" style="font-weight: bold; margin-right: 15px;">
+                    ${isAltnActive 
+                        ? (flightData.etd ? flightData.etd.replace(':', '') + 'Z' : '1710Z') 
+                        : (flightData.eta ? flightData.eta.replace(':', '') + 'Z' : '0612Z')}
+                </span>
                 <span class="text-white-fms">LOCAL</span>
-                <span style="color: var(--text-green); font-weight: bold;">${isAltnActive ? '10:10 L' : '15:12 L'}</span>
+                <span style="color: var(--text-green); font-weight: bold;">
+                    ${isAltnActive 
+                        ? getLocalTimeStr(flightData.etd || '17:10', getAirportOffset(flightData.from || 'KLAX')) 
+                        : getLocalTimeStr(flightData.eta || '06:12', getAirportOffset(flightData.to || 'RKSI'))}
+                </span>
             </div>
         </div>
 
@@ -1887,8 +2057,37 @@ if (fileInputEl) {
         }
 
         // 18. ETD/ETA — "ETD KLAX 1710Z ETA RKSI 0612Z"
-        const etaMatch = fullText.match(/ETA\s+[A-Z]{4}\s+(\d{2})(\d{2})Z/i);
-        if (etaMatch) { destUtc = etaMatch[1] + ':' + etaMatch[2]; matchedCount++; }
+        const etdEtaMatch = fullText.match(/ETD\s+[A-Z]{4}\s+(\d{2})(\d{2})Z\s+ETA\s+[A-Z]{4}\s+(\d{2})(\d{2})Z/i);
+        if (etdEtaMatch) {
+            flightData.etd = etdEtaMatch[1] + ':' + etdEtaMatch[2];
+            flightData.eta = etdEtaMatch[3] + ':' + etdEtaMatch[4];
+            destUtc = flightData.eta;
+            matchedCount++;
+        } else {
+            const etaMatch = fullText.match(/ETA\s+[A-Z]{4}\s+(\d{2})(\d{2})Z/i);
+            if (etaMatch) {
+                flightData.eta = etaMatch[1] + ':' + etaMatch[2];
+                destUtc = flightData.eta;
+                matchedCount++;
+            }
+        }
+
+        // 19. FLIGHT DAY — "RELEASE THE FLIGHT AAR0201/08JUN"
+        const releaseMatch = fullText.match(/RELEASE\s+THE\s+FLIGHT\s+[A-Z]{2,3}\d{1,4}\/(\d{2})[A-Z]{3}\b/i) ||
+                             fullText.match(/FLIGHT\s+[A-Z]{2,3}\d{1,4}\/(\d{2})[A-Z]{3}\b/i);
+        if (releaseMatch) {
+            flightData.flightDay = releaseMatch[1];
+            matchedCount++;
+        }
+
+        // 20. WEATHER SECTIONS
+        flightData.depWeatherRaw = extractWeatherSection(fullText, 'DEPARTURE WEATHER');
+        flightData.arrWeatherRaw = extractWeatherSection(fullText, 'ARRIVAL WEATHER');
+        flightData.altnWeatherRaw = extractWeatherSection(fullText, 'ALTERNATE WEATHER');
+        flightData.enrteWeatherRaw = extractWeatherSection(fullText, 'ENROUTE WEATHER');
+        if (flightData.depWeatherRaw.length > 0 || flightData.arrWeatherRaw.length > 0) {
+            matchedCount++;
+        }
 
         // Fallback calculations for TOW, LW, and FOD if not explicitly parsed from PDF
         if (!towMatch && (zfwMatch || rampMatch || taxiMatch)) {
