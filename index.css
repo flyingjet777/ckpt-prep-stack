@@ -664,3 +664,7 @@ body {
     color: #ffaa00;
 }
 
+.btn-return, .fms-btn-scroll {
+    border-color: #ffffff !important;
+}
+

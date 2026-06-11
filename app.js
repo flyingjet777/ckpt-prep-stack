@@ -1248,8 +1248,8 @@ function renderMelCdlPage() {
 
             <!-- Table Vertical Scroll Navigation -->
             <div style="display: flex; justify-content: center; gap: 8px; margin-bottom: 4px;">
-                <button class="fms-btn-grey" id="btn-mel-scroll-down" style="width: 38px; height: 28px; font-size: 0.65rem; padding: 2px;">▼▼</button>
-                <button class="fms-btn-grey" id="btn-mel-scroll-up" style="width: 38px; height: 28px; font-size: 0.65rem; padding: 2px;">▲▲</button>
+                <button class="fms-btn-grey fms-btn-scroll" id="btn-mel-scroll-down" style="width: 38px; height: 28px; font-size: 0.65rem; padding: 2px;">▼▼</button>
+                <button class="fms-btn-grey fms-btn-scroll" id="btn-mel-scroll-up" style="width: 38px; height: 28px; font-size: 0.65rem; padding: 2px;">▲▲</button>
             </div>
         ` : `
             <!-- Crew Defer procedure regulation contents -->
@@ -1519,8 +1519,8 @@ function renderDepArrWxPage() {
 
         <!-- Table Vertical Scroll Navigation (Hidden for TAF) -->
         <div style="display: flex; justify-content: center; gap: 8px; margin-bottom: 4px; visibility: hidden; height: 28px;">
-            <button class="fms-btn-grey" style="width: 38px; height: 28px; font-size: 0.65rem; padding: 2px;">▼▼</button>
-            <button class="fms-btn-grey" style="width: 38px; height: 28px; font-size: 0.65rem; padding: 2px;">▲▲</button>
+            <button class="fms-btn-grey fms-btn-scroll" style="width: 38px; height: 28px; font-size: 0.65rem; padding: 2px;">▼▼</button>
+            <button class="fms-btn-grey fms-btn-scroll" style="width: 38px; height: 28px; font-size: 0.65rem; padding: 2px;">▲▲</button>
         </div>
 
         <!-- Bottom Actions Row -->
@@ -1588,8 +1588,8 @@ function renderEnrteWxPage() {
 
         <!-- Table Vertical Scroll Navigation -->
         <div style="display: flex; justify-content: center; gap: 8px; margin-bottom: 4px;">
-            <button class="fms-btn-grey" id="btn-enrte-wx-scroll-down" style="width: 38px; height: 28px; font-size: 0.65rem; padding: 2px;">▼▼</button>
-            <button class="fms-btn-grey" id="btn-enrte-wx-scroll-up" style="width: 38px; height: 28px; font-size: 0.65rem; padding: 2px;">▲▲</button>
+            <button class="fms-btn-grey fms-btn-scroll" id="btn-enrte-wx-scroll-down" style="width: 38px; height: 28px; font-size: 0.65rem; padding: 2px;">▼▼</button>
+            <button class="fms-btn-grey fms-btn-scroll" id="btn-enrte-wx-scroll-up" style="width: 38px; height: 28px; font-size: 0.65rem; padding: 2px;">▲▲</button>
         </div>
 
         <!-- Bottom Actions Row -->
@@ -1649,8 +1649,8 @@ function renderRteSummaryPage() {
 
         <!-- Table Vertical Scroll Navigation -->
         <div style="display: flex; justify-content: center; gap: 8px; margin-bottom: 4px;">
-            <button class="fms-btn-grey" id="btn-route-scroll-down" style="width: 38px; height: 28px; font-size: 0.65rem; padding: 2px;">▼▼</button>
-            <button class="fms-btn-grey" id="btn-route-scroll-up" style="width: 38px; height: 28px; font-size: 0.65rem; padding: 2px;">▲▲</button>
+            <button class="fms-btn-grey fms-btn-scroll" id="btn-route-scroll-down" style="width: 38px; height: 28px; font-size: 0.65rem; padding: 2px;">▼▼</button>
+            <button class="fms-btn-grey fms-btn-scroll" id="btn-route-scroll-up" style="width: 38px; height: 28px; font-size: 0.65rem; padding: 2px;">▲▲</button>
         </div>
 
         <!-- Bottom Actions Row (raised by 3px/3pt using margin/padding tweaks, plus 2pt more) -->
@@ -1855,8 +1855,8 @@ function renderStepAltsPage() {
 
         <!-- Table Vertical Scroll Navigation -->
         <div style="display: flex; justify-content: center; gap: 8px; margin-bottom: 4px;">
-            <button class="fms-btn-grey" id="btn-step-scroll-down" style="width: 38px; height: 28px; font-size: 0.65rem; padding: 2px;">▼▼</button>
-            <button class="fms-btn-grey" id="btn-step-scroll-up" style="width: 38px; height: 28px; font-size: 0.65rem; padding: 2px;">▲▲</button>
+            <button class="fms-btn-grey fms-btn-scroll" id="btn-step-scroll-down" style="width: 38px; height: 28px; font-size: 0.65rem; padding: 2px;">▼▼</button>
+            <button class="fms-btn-grey fms-btn-scroll" id="btn-step-scroll-up" style="width: 38px; height: 28px; font-size: 0.65rem; padding: 2px;">▲▲</button>
         </div>
 
         <!-- Max SR/Turb Point Box -->
