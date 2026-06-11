@@ -43,7 +43,8 @@ const flightData = {
     depWeatherRaw: [],
     arrWeatherRaw: [],
     altnWeatherRaw: [],
-    enrteWeatherRaw: []
+    enrteWeatherRaw: [],
+    turbZones: null
 };
 
 // Keep track of raw values parsed from PDF
@@ -53,6 +54,8 @@ function resetFlightData() {
     for (let key in flightData) {
         if (key === 'mode') flightData[key] = 'ECON';
         else if (key === 'tropo') flightData[key] = '36090 FT';
+        else if (key === 'turbZones') flightData[key] = null;
+        else if (Array.isArray(flightData[key])) flightData[key] = [];
         else flightData[key] = '';
     }
     melCdlData = [];
@@ -624,6 +627,79 @@ function parseStepAlts(routeStr, fromAirport, fullText) {
         steps.push({ wpt: '--------', alt: '---', dist: '', time: '' });
     }
     return steps;
+}
+
+function extractTurbulenceZones(wpts) {
+    let greenZones = [];
+    let redZones = [];
+    
+    let currentGreen = [];
+    let currentRed = [];
+    
+    for (let i = 0; i < wpts.length; i++) {
+        const pt = wpts[i];
+        const sr = parseInt(pt.sr, 10);
+        
+        if (sr >= 4 && sr <= 6) {
+            currentGreen.push(pt);
+            if (currentRed.length > 0) {
+                redZones.push(currentRed);
+                currentRed = [];
+            }
+        } else if (sr >= 7) {
+            currentRed.push(pt);
+            if (currentGreen.length > 0) {
+                greenZones.push(currentGreen);
+                currentGreen = [];
+            }
+        } else {
+            if (currentGreen.length > 0) {
+                greenZones.push(currentGreen);
+                currentGreen = [];
+            }
+            if (currentRed.length > 0) {
+                redZones.push(currentRed);
+                currentRed = [];
+            }
+        }
+    }
+    if (currentGreen.length > 0) greenZones.push(currentGreen);
+    if (currentRed.length > 0) redZones.push(currentRed);
+    
+    const formatZone = (zone, color) => {
+        if (zone.length === 0) return null;
+        const startPt = zone[0];
+        const endPt = zone[zone.length - 1];
+        
+        const srs = zone.map(p => parseInt(p.sr, 10));
+        const minSr = Math.min(...srs);
+        const maxSr = Math.max(...srs);
+        const srStr = minSr === maxSr ? String(minSr).padStart(2, '0') : `${String(minSr).padStart(2, '0')}-${String(maxSr).padStart(2, '0')}`;
+        
+        const formatActm = (actmStr) => {
+            return actmStr.replace('.', '+');
+        };
+        
+        const startActm = formatActm(startPt.actm);
+        const endActm = formatActm(endPt.actm);
+        const actmStr = startPt.actm === endPt.actm ? startActm : `${startActm} / ${endActm}`;
+        const label = startPt.wpt === endPt.wpt ? startPt.wpt : `${startPt.wpt} / ${endPt.wpt}`;
+        
+        return {
+            label,
+            sr: srStr,
+            time: actmStr,
+            color
+        };
+    };
+    
+    greenZones.sort((a, b) => b.length - a.length);
+    redZones.sort((a, b) => b.length - a.length);
+    
+    return {
+        green: greenZones.length > 0 ? formatZone(greenZones[0], 'var(--text-green)') : null,
+        red: redZones.length > 0 ? formatZone(redZones[0], 'var(--text-red)') : null
+    };
 }
 
 function extractWeatherSection(fullText, headerName) {
@@ -1913,6 +1989,53 @@ function renderStepAltsPage() {
 
     const initialFL = stepAltData[0] ? stepAltData[0].alt.replace('FL', '') : (flightData.crzFl || '350');
 
+    const greenZone = flightData.turbZones && flightData.turbZones.green;
+    const redZone = flightData.turbZones && flightData.turbZones.red;
+    
+    const greenHTML = greenZone ? `
+        <div style="color: #ffffff;">
+            AT <span style="color: var(--text-green);">${greenZone.label}</span>
+        </div>
+        <div style="color: #ffffff;">
+            SR <span style="color: var(--text-green);">${greenZone.sr}</span>
+        </div>
+        <div style="color: #ffffff; margin-right: 5px;">
+            TIME AFTER DEP <span style="color: var(--text-green);">${greenZone.time}</span>
+        </div>
+    ` : `
+        <div style="color: #ffffff;">
+            AT <span style="color: var(--text-green);">ETP2 / ASTER</span>
+        </div>
+        <div style="color: #ffffff;">
+            SR <span style="color: var(--text-green);">04-05</span>
+        </div>
+        <div style="color: #ffffff; margin-right: 5px;">
+            TIME AFTER DEP <span style="color: var(--text-green);">07+59 / 10+28</span>
+        </div>
+    `;
+
+    const redHTML = redZone ? `
+        <div style="color: #ffffff;">
+            AT <span style="color: var(--text-red);">${redZone.label}</span>
+        </div>
+        <div style="color: #ffffff;">
+            SR <span style="color: var(--text-red);">${redZone.sr}</span>
+        </div>
+        <div style="color: #ffffff; margin-right: 5px;">
+            TIME AFTER DEP <span style="color: var(--text-red);">${redZone.time}</span>
+        </div>
+    ` : `
+        <div style="color: #ffffff;">
+            AT <span style="color: var(--text-red);">SDE / GTC</span>
+        </div>
+        <div style="color: #ffffff;">
+            SR <span style="color: var(--text-red);">08</span>
+        </div>
+        <div style="color: #ffffff; margin-right: 5px;">
+            TIME AFTER DEP <span style="color: var(--text-red);">10+44 / 10+58</span>
+        </div>
+    `;
+
     mainContent.innerHTML = `
         <!-- Folder Tabs -->
         <div class="fms-tabs" style="margin-bottom: 6px;">
@@ -1947,27 +2070,11 @@ function renderStepAltsPage() {
             <div style="display: flex; flex-direction: column; gap: 6px; font-size: 0.72rem; font-weight: bold;">
                 <!-- Line 1: LTM Caution Zone -->
                 <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
-                    <div style="color: #ffffff;">
-                        AT <span style="color: var(--text-green);">ETP2 / ASTER</span>
-                    </div>
-                    <div style="color: #ffffff;">
-                        SR <span style="color: var(--text-green);">04-05</span>
-                    </div>
-                    <div style="color: #ffffff; margin-right: 5px;">
-                        TIME AFTER DEP <span style="color: var(--text-green);">07+59 / 10+28</span>
-                    </div>
+                    ${greenHTML}
                 </div>
                 <!-- Line 2: MOD Caution Zone -->
                 <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
-                    <div style="color: #ffffff;">
-                        AT <span style="color: var(--text-red);">SDE / GTC</span>
-                    </div>
-                    <div style="color: #ffffff;">
-                        SR <span style="color: var(--text-red);">08</span>
-                    </div>
-                    <div style="color: #ffffff; margin-right: 5px;">
-                        TIME AFTER DEP <span style="color: var(--text-red);">10+44 / 10+58</span>
-                    </div>
+                    ${redHTML}
                 </div>
             </div>
         </div>
@@ -2560,10 +2667,34 @@ if (fileInputEl) {
             }
             if (routeStr) {
                 routeData = parseFlightPlanRoute(routeStr);
-                const parsedSteps = parseStepAlts(routeStr, flightData.from);
+                const parsedSteps = parseStepAlts(routeStr, flightData.from, fullText);
                 stepAltData.length = 0;
                 parsedSteps.forEach(step => stepAltData.push(step));
                 stepAltScrollIndex = 0;
+                
+                // Parse all waypoints with SR and ACTM for turbulence zones
+                const wptsForTurb = [];
+                const coordRe = /^([A-Z0-9]{2,10})\s+[WE]\d{2,3}\s+\d{1,2}\.\d\s+\d{3}\s+\/\s+(?:\d{2,3}|\.\.)\s+(?:\d{3,4}|\.\.\.)\s+(\d{2}\.\d{2})\s+(\d{4})\//;
+                const srRe = /\b\d{5}(?:[PM]\d{3}|\s+\d{3})\s+(\d{2})\s+(\d{3})\b/;
+                for (let i = 0; i < lines.length; i++) {
+                    const lineStr = lines[i].trim();
+                    const matchCoord = lineStr.match(coordRe);
+                    if (matchCoord) {
+                        const wpt = matchCoord[1];
+                        const actm = matchCoord[2];
+                        let sr = '00';
+                        const prevLine = lines[i - 1] || '';
+                        const srMatch = prevLine.match(srRe) || lineStr.match(srRe);
+                        if (srMatch) {
+                            sr = srMatch[1];
+                        }
+                        wptsForTurb.push({ wpt, sr, actm });
+                    }
+                }
+                if (wptsForTurb.length > 0) {
+                    flightData.turbZones = extractTurbulenceZones(wptsForTurb);
+                }
+                
                 matchedCount++;
             }
         }
