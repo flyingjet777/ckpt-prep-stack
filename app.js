@@ -125,7 +125,10 @@ function getPageTextWithNewlines(textContent) {
         lastY = y;
     });
     
-    return text;
+    // Split by lines, filter out lines that match page numbers, then join back
+    const lines = text.split('\n');
+    const filteredLines = lines.filter(line => !line.trim().match(/^Page\s+\d+$/i));
+    return filteredLines.join('\n');
 }
 
 function getAirportOffset(icao) {
@@ -205,6 +208,294 @@ function parseTafLines(lines, targetDay, targetTime) {
     }));
 }
 
+function getAirportLongitude(icao) {
+    if (!icao) return 0;
+    const coords = {
+        'CYEG': -113.5, 'CYVR': -123.18, 'CYWG': -97.24, 'CYXE': -106.7,
+        'CYXY': -135.07, 'CYYC': -114.02, 'CYYQ': -94.06, 'CYYZ': -79.63,
+        'CYZF': -114.44, 'KBOS': -71.01, 'KDLH': -92.18, 'KDTW': -83.35,
+        'KJFK': -73.78, 'KLAX': -118.41, 'KMSP': -93.22, 'KONT': -117.6,
+        'KORD': -87.9, 'KRFD': -89.1, 'KSEA': -122.3, 'KSFO': -122.37,
+        'PACD': -162.72, 'PAFA': -147.86, 'PAKN': -156.65, 'PAKT': -131.71,
+        'PANC': -149.99, 'PASY': 174.11, 'PHNL': -157.92, 'PKWA': 167.73,
+        'PMDY': -177.38, 'PWAK': 166.64, 'RJAA': 140.39, 'RJBB': 135.23,
+        'RJCC': 141.69, 'RJGG': 136.81, 'RJTT': 139.78, 'RKPC': 126.49,
+        'RKSI': 126.44, 'RKSS': 126.79, 'ROAH': 127.64, 'RORS': 124.78
+    };
+    return coords[icao.toUpperCase()] !== undefined ? coords[icao.toUpperCase()] : 0;
+}
+
+function getAirportEta(icao) {
+    const from = flightData.from || 'KLAX';
+    const to = flightData.to || 'RKSI';
+    const altn = flightData.altn || 'RKSS';
+    
+    const depDay = parseInt(flightData.flightDay || '08', 10);
+    const [etdH, etdM] = (flightData.etd || '17:10').split(':').map(Number);
+    const mDep = depDay * 1440 + etdH * 60 + etdM;
+    
+    let tripDuration = 13 * 60 + 2; // default 13:02
+    if (flightData.tripTime) {
+        const parts = flightData.tripTime.split(':');
+        if (parts.length === 2) {
+            const h = parseInt(parts[0], 10);
+            const m = parseInt(parts[1], 10);
+            if (!isNaN(h) && !isNaN(m)) {
+                tripDuration = h * 60 + m;
+            }
+        }
+    }
+    
+    let targetM = mDep;
+    const code = icao.toUpperCase();
+    
+    if (code === from.toUpperCase()) {
+        targetM = mDep;
+    } else if (code === to.toUpperCase()) {
+        targetM = mDep + tripDuration;
+    } else if (code === altn.toUpperCase()) {
+        let altnDuration = 17; // default 17 mins
+        if (flightData.altnTime) {
+            const parts = flightData.altnTime.split(':');
+            if (parts.length === 2) {
+                const h = parseInt(parts[0], 10);
+                const m = parseInt(parts[1], 10);
+                if (!isNaN(h) && !isNaN(m)) {
+                    altnDuration = h * 60 + m;
+                }
+            }
+        }
+        targetM = mDep + tripDuration + altnDuration;
+    } else {
+        const lonD = getAirportLongitude(from);
+        const lonA = getAirportLongitude(to);
+        const lonP = getAirportLongitude(code);
+        
+        let fraction = 0.5;
+        if (lonD !== 0 || lonA !== 0) {
+            let diffEast = lonA - lonD;
+            if (diffEast < 0) diffEast += 360;
+            
+            let diffWest = lonD - lonA;
+            if (diffWest < 0) diffWest += 360;
+            
+            const isEastbound = diffEast < diffWest;
+            const totalDistance = isEastbound ? diffEast : diffWest;
+            
+            let distP = 0;
+            if (isEastbound) {
+                distP = lonP - lonD;
+                if (distP < 0) distP += 360;
+            } else {
+                distP = lonD - lonP;
+                if (distP < 0) distP += 360;
+            }
+            
+            fraction = totalDistance > 0 ? distP / totalDistance : 0.5;
+            if (fraction < 0) fraction = 0;
+            if (fraction > 1) fraction = 1;
+        }
+        targetM = mDep + fraction * tripDuration;
+    }
+    
+    const day = Math.floor(targetM / 1440);
+    const timeMin = Math.floor(targetM % 1440);
+    const hour = Math.floor(timeMin / 60);
+    const min = timeMin % 60;
+    
+    return {
+        day: String(day).padStart(2, '0'),
+        time: String(hour).padStart(2, '0') + ':' + String(min).padStart(2, '0')
+    };
+}
+
+function parseTafLinesWithWindow(rawLines, windowHours, allowedIcaos = null) {
+    const airportBlocks = [];
+    let currentBlock = null;
+    
+    rawLines.forEach((lineText, originalIndex) => {
+        const line = lineText.trim();
+        if (line.match(/^\s*TAF\b/i)) {
+            if (currentBlock) {
+                airportBlocks.push(currentBlock);
+            }
+            const parts = line.split(/\s+/);
+            let icao = '';
+            for (let i = 1; i < parts.length; i++) {
+                if (parts[i].length === 4 && parts[i].match(/^[A-Z]{4}$/i)) {
+                    icao = parts[i].toUpperCase();
+                    break;
+                }
+            }
+            currentBlock = {
+                icao: icao,
+                lines: []
+            };
+        }
+        
+        if (currentBlock) {
+            currentBlock.lines.push({ text: lineText, originalIndex });
+        } else {
+            currentBlock = { icao: '', lines: [] };
+            currentBlock.lines.push({ text: lineText, originalIndex });
+        }
+    });
+    if (currentBlock) {
+        airportBlocks.push(currentBlock);
+    }
+    
+    const result = rawLines.map(line => ({ text: line, highlight: false }));
+    const depDay = parseInt(flightData.flightDay || '08', 10);
+    
+    function parseDay(dayStr) {
+        const d = parseInt(dayStr, 10);
+        if (depDay >= 28 && d <= 5) return d + 30;
+        if (depDay <= 5 && d >= 25) return d - 30;
+        return d;
+    }
+    
+    airportBlocks.forEach(block => {
+        if (allowedIcaos && block.icao && !allowedIcaos.includes(block.icao)) return;
+        const lines = block.lines;
+        if (lines.length === 0) return;
+        
+        const etaInfo = getAirportEta(block.icao || flightData.to);
+        const targetDayVal = parseDay(etaInfo.day);
+        const [tHour, tMin] = etaInfo.time.split(':').map(Number);
+        const targetMin = targetDayVal * 1440 + tHour * 60 + tMin;
+        
+        const windowMin = windowHours * 60;
+        const etaStart = targetMin - windowMin;
+        const etaEnd = targetMin + windowMin;
+        
+        let tStart = null;
+        let tEnd = null;
+        
+        const firstLine = lines[0].text;
+        const tafMatch = firstLine.match(/\bTAF\s+(?:AMD\s+|COR\s+)?([A-Z]{4})\s+\d{6}Z\s+(\d{2})(\d{2})\/(\d{2})(\d{2})\b/i) ||
+                         firstLine.match(/\b([A-Z]{4})\s+\d{6}Z\s+(\d{2})(\d{2})\/(\d{2})(\d{2})\b/i);
+        if (tafMatch) {
+            const startDay = parseDay(tafMatch[2]);
+            const startHour = parseInt(tafMatch[3], 10);
+            const endDay = parseDay(tafMatch[4]);
+            const endHour = parseInt(tafMatch[5], 10);
+            tStart = startDay * 1440 + startHour * 60;
+            tEnd = endDay * 1440 + endHour * 60;
+        } else {
+            tStart = depDay * 1440;
+            tEnd = (depDay + 2) * 1440;
+        }
+        
+        const parsedLines = lines.map((item, idx) => {
+            const line = item.text.trim();
+            let type = 'MAIN';
+            let start = null;
+            let end = null;
+            
+            const fmMatch = line.match(/\bFM(\d{2})(\d{2})(\d{2})\b/i);
+            if (fmMatch) {
+                type = 'FM';
+                const day = parseDay(fmMatch[1]);
+                const hour = parseInt(fmMatch[2], 10);
+                const min = parseInt(fmMatch[3], 10);
+                start = day * 1440 + hour * 60 + min;
+            } else {
+                const becmgMatch = line.match(/\bBECMG\s+(\d{2})(\d{2})\/(\d{2})(\d{2})\b/i);
+                if (becmgMatch) {
+                    type = 'BECMG';
+                    const day1 = parseDay(becmgMatch[1]);
+                    const hour1 = parseInt(becmgMatch[2], 10);
+                    start = day1 * 1440 + hour1 * 60;
+                } else {
+                    const tempoMatch = line.match(/\bTEMPO\s+(\d{2})(\d{2})\/(\d{2})(\d{2})\b/i);
+                    if (tempoMatch) {
+                        type = 'TEMPO';
+                        const day1 = parseDay(tempoMatch[1]);
+                        const hour1 = parseInt(tempoMatch[2], 10);
+                        const day2 = parseDay(tempoMatch[3]);
+                        const hour2 = parseInt(tempoMatch[4], 10);
+                        start = day1 * 1440 + hour1 * 60;
+                        end = day2 * 1440 + hour2 * 60;
+                    } else {
+                        const probMatch = line.match(/\bPROB\d{2}\s+(\d{2})(\d{2})\/(\d{2})(\d{2})\b/i);
+                        if (probMatch) {
+                            type = 'PROB';
+                            const day1 = parseDay(probMatch[1]);
+                            const hour1 = parseInt(probMatch[2], 10);
+                            const day2 = parseDay(probMatch[3]);
+                            const hour2 = parseInt(probMatch[4], 10);
+                            start = day1 * 1440 + hour1 * 60;
+                            end = day2 * 1440 + hour2 * 60;
+                        }
+                    }
+                }
+            }
+            
+            return { originalIndex: item.originalIndex, type, start, end, idx };
+        });
+        
+        const persistent = parsedLines.filter(l => l.type === 'MAIN' || l.type === 'FM' || l.type === 'BECMG');
+        const startLines = persistent.filter(l => l.start !== null || l.idx === 0);
+        if (startLines.length > 0 && startLines[0].start === null) {
+            startLines[0].start = tStart;
+        }
+        startLines.sort((a, b) => a.start - b.start);
+        
+        for (let i = 0; i < startLines.length; i++) {
+            const current = startLines[i];
+            const next = startLines[i + 1];
+            current.end = next ? next.start : tEnd;
+        }
+        
+        let lastStartLine = null;
+        parsedLines.forEach(l => {
+            if (l.type === 'MAIN' && l.idx === 0) {
+                l.start = tStart;
+                l.end = startLines[0].end;
+                lastStartLine = l;
+            } else if (l.type === 'FM' || l.type === 'BECMG') {
+                const sl = startLines.find(x => x.idx === l.idx);
+                if (sl) {
+                    l.start = sl.start;
+                    l.end = sl.end;
+                    lastStartLine = l;
+                }
+            } else if (l.type === 'TEMPO' || l.type === 'PROB') {
+                // Keep its own start and end
+            } else {
+                if (lastStartLine) {
+                    l.start = lastStartLine.start;
+                    l.end = lastStartLine.end;
+                    l.type = lastStartLine.type;
+                }
+            }
+        });
+        
+        parsedLines.forEach(l => {
+            const start = l.start;
+            const end = l.end;
+            if (start !== null && end !== null) {
+                const overlaps = (start <= etaEnd && end >= etaStart);
+                if (overlaps) {
+                    result[l.originalIndex].highlight = true;
+                }
+            }
+        });
+    });
+    
+    if (allowedIcaos) {
+        const allowedIndices = new Set();
+        airportBlocks.forEach(block => {
+            if (!block.icao || allowedIcaos.includes(block.icao)) {
+                block.lines.forEach(l => allowedIndices.add(l.originalIndex));
+            }
+        });
+        return result.filter((_, idx) => allowedIndices.has(idx));
+    }
+
+    return result;
+}
+
 function extractWeatherSection(fullText, headerName) {
     const headerIdx = fullText.toUpperCase().indexOf(headerName.toUpperCase());
     if (headerIdx === -1) return [];
@@ -220,11 +511,15 @@ function extractWeatherSection(fullText, headerName) {
     const rawLines = weatherText.split('\n');
     for (let i = 0; i < rawLines.length; i++) {
         const line = rawLines[i].trim();
-        if (line.match(/^\-{5,}$/)) {
-            break;
+        if (line.match(/^Page\s+\d+/i)) {
+            continue;
         }
         if (headerName.toUpperCase() === 'ENROUTE WEATHER') {
-            if (line.match(/^Page\s+\d+/i) || line.toLowerCase().includes('win te') || line.toLowerCase().includes('plan valid')) {
+            if (line.toLowerCase().includes('win te') || line.toLowerCase().includes('plan valid') || line.toLowerCase().includes('average wind') || line.toLowerCase().includes('hereby release') || line.match(/^\s*MEL\/CDL ITEMS\s*$/i)) {
+                break;
+            }
+        } else {
+            if (line.match(/^\-{5,}$/)) {
                 break;
             }
         }
@@ -1011,23 +1306,29 @@ function formatTafLine(item) {
 
 function getProcessedEnrteWxData() {
     let rawLines = [];
+    let windowHours = 1.0;
+    let allowedIcaos = null;
+    
     if (activeEnrteWxTab === 'ALTN') {
         rawLines = flightData.altnWeatherRaw && flightData.altnWeatherRaw.length > 0
             ? flightData.altnWeatherRaw
             : alternateWxData.map(d => d.text);
+        windowHours = 1.0;
     } else {
         rawLines = flightData.enrteWeatherRaw && flightData.enrteWeatherRaw.length > 0
             ? flightData.enrteWeatherRaw
             : enrouteWxDataList.map(d => d.text);
+        windowHours = 3.0;
+        allowedIcaos = [
+            'PANC', 'PACD', 
+            'RJAA', 'RJTT', 'RJCC', 'RJSS', 'RJBB', 
+            'KSEA', 'KSFO', 'KORD', 'KOAK', 'KLAX', 'KONT', 'PHNL', 'KJFK', 'KBOS', 'KPHL', 'KIAD', 
+            'CYVR', 'CYUL', 'CYEG', 'CYWG', 'CYYZ', 
+            'RKSI', 'RKSS', 'RKTU', 'RKPC', 'RKPK'
+        ];
     }
     
-    const depDay = flightData.flightDay || '08';
-    const depTime = flightData.etd || '17:10';
-    const arrTime = flightData.eta || '06:12';
-    const targetDay = getArrivalDay(depDay, depTime, arrTime);
-    const targetTime = arrTime;
-    
-    const highlightedData = parseTafLines(rawLines, targetDay, targetTime);
+    const highlightedData = parseTafLinesWithWindow(rawLines, windowHours, allowedIcaos);
     
     const tafData = [];
     for (let i = 0; i < highlightedData.length; i++) {
@@ -1227,20 +1528,16 @@ function renderEnrteWxPage() {
             </div>
         </div>
 
-        <!-- Row 2: ETD/ETA & LOCAL -->
+        <!-- Row 2: ETA & LOCAL -->
         <div class="fms-row" style="margin-bottom: 4px;">
             <div class="fms-cell" style="justify-content: flex-start; gap: 8px; font-size: 0.9rem;">
-                <span class="text-white-fms">${isAltnActive ? 'ETD' : 'ETA'}</span>
+                <span class="text-white-fms">ETA</span>
                 <span class="text-green-fms" style="font-weight: bold; margin-right: 15px;">
-                    ${isAltnActive 
-                        ? (flightData.etd ? flightData.etd.replace(':', '') + 'Z' : '1710Z') 
-                        : (flightData.eta ? flightData.eta.replace(':', '') + 'Z' : '0612Z')}
+                    ${flightData.eta ? flightData.eta.replace(':', '') + 'Z' : '0612Z'}
                 </span>
                 <span class="text-white-fms">LOCAL</span>
                 <span style="color: var(--text-green); font-weight: bold;">
-                    ${isAltnActive 
-                        ? getLocalTimeStr(flightData.etd || '17:10', getAirportOffset(flightData.from || 'KLAX')) 
-                        : getLocalTimeStr(flightData.eta || '06:12', getAirportOffset(flightData.to || 'RKSI'))}
+                    ${getLocalTimeStr(flightData.eta || '06:12', getAirportOffset(flightData.to || 'RKSI'))}
                 </span>
             </div>
         </div>
