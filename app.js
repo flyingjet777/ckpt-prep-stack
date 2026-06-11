@@ -1578,11 +1578,13 @@ function renderEnrteWxPage() {
         </div>
 
         <!-- Table (13 rows) -->
-        <table class="rte-summary-table mel-cdl-table" style="margin-bottom: 4px;">
-            <tbody id="enrte-wx-table-body">
-                ${getEnrteWxTableHTML()}
-            </tbody>
-        </table>
+        <div class="fms-weather-container" style="height: 330px; border: 1.5px solid #2f3542; background-color: #12141a; overflow-y: auto; margin-bottom: 4px; width: 100%;">
+            <table class="rte-summary-table mel-cdl-table" style="margin-bottom: 0; border: none; background-color: transparent; width: 100%;">
+                <tbody id="enrte-wx-table-body">
+                    ${getEnrteWxTableHTML()}
+                </tbody>
+            </table>
+        </div>
 
         <!-- Table Vertical Scroll Navigation -->
         <div style="display: flex; justify-content: center; gap: 8px; margin-bottom: 4px;">
