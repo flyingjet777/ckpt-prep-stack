@@ -2543,23 +2543,29 @@ if (fileInputEl) {
 }
 
 function adjustBezelScale() {
-    const bezelWidth = 930; // 580px (bezel) + 30px (gap) + 320px (debug panel)
-    const bezelHeight = 740;
-    const padding = 20; // safe area padding
+    const bezelWidth = 580; // FMS bezel width
+    const bezelHeight = 740; // FMS bezel height
+    const padding = 10;
     
     const winW = window.innerWidth;
     const winH = window.innerHeight;
     
-    // Calculate scale to fit both width and height perfectly within the viewport
-    let scale = Math.min((winW - padding) / bezelWidth, (winH - padding) / bezelHeight);
+    const isLandscape = winW > winH;
+    let scale;
     
-    // Set a minimum scale limit for readability on very small screens (e.g. 0.5)
+    if (isLandscape) {
+        scale = Math.min((winW - padding) / bezelHeight, (winH - padding) / bezelWidth);
+        document.body.classList.add('rotated-landscape');
+    } else {
+        scale = (winW - padding) / bezelWidth;
+        document.body.classList.remove('rotated-landscape');
+    }
+    
     const minScale = 0.5;
     if (scale < minScale) {
         scale = minScale;
     }
     
-    // Set scale CSS variable on body
     document.body.style.setProperty('--scale', scale);
 }
 
