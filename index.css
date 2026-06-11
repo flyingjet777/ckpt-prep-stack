@@ -302,7 +302,9 @@ body {
     width: 75px !important;
 }
 .row-flt-nbr .acft-status-btn {
-    width: 104px !important;
+    width: auto !important;
+    padding-left: 10px !important;
+    padding-right: 10px !important;
 }
 .row-flt-nbr .cpny-request-btn {
     width: 115px !important;
