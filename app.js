@@ -1267,7 +1267,7 @@ function renderFuelLoadPage() {
         <!-- RETURN button moved to bottom of page (above the MSG LIST footer) -->
         <div class="fms-row" style="margin-top: auto; padding-bottom: 2px;">
             <div class="fms-cell" style="justify-content: flex-start;">
-                <button class="msg-btn btn-return" id="btn-return">RETURN</button>
+                <button class="msg-btn btn-return" id="btn-return" style="height: 28px; width: 55px; font-size: 0.68rem; padding: 2px;">RETURN</button>
             </div>
         </div>
     `;
