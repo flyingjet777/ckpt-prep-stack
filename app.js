@@ -561,11 +561,11 @@ function renderInitPage() {
                 <div class="fms-val-box extracted-value airport-box">
                     <input type="text" value="${flightData.from}" data-field="from">
                 </div>
-                <span style="color: var(--text-white); font-weight: bold; font-size: 0.95rem; margin: 0 4px;">TO</span>
+                <span style="color: var(--text-white); font-weight: 700; font-size: 0.8rem; margin: 0 4px;">TO</span>
                 <div class="fms-val-box extracted-value airport-box">
                     <input type="text" value="${flightData.to}" data-field="to">
                 </div>
-                <span style="color: var(--text-white); font-weight: bold; font-size: 0.95rem; margin: 0 4px;">ALTN</span>
+                <span style="color: var(--text-white); font-weight: 700; font-size: 0.8rem; margin: 0 4px;">ALTN</span>
                 <div class="fms-val-box extracted-value altn-airport-box">
                     <input type="text" value="${flightData.altn}" data-field="altn">
                 </div>
