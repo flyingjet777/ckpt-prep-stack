@@ -516,15 +516,15 @@ function extractWeatherSection(fullText, headerName) {
         }
         if (headerName.toUpperCase() === 'ENROUTE WEATHER') {
             const lowerLine = line.toLowerCase();
-            if (lowerLine.includes('win te') || 
-                lowerLine.includes('wintem') || 
-                lowerLine.includes('sig wx') || 
-                lowerLine.includes('sig chart') || 
-                lowerLine.includes('notam') || 
-                lowerLine.includes('plan valid') || 
-                lowerLine.includes('average wind') || 
-                lowerLine.includes('hereby release') || 
-                line.match(/^\s*MEL\/CDL ITEMS\s*$/i)) {
+            const noSpaceLine = lowerLine.replace(/\s+/g, '');
+            if (noSpaceLine.includes('wintem') || 
+                noSpaceLine.includes('sigwx') || 
+                noSpaceLine.includes('sigchart') || 
+                noSpaceLine.includes('notam') || 
+                noSpaceLine.includes('planvalid') || 
+                noSpaceLine.includes('averagewind') || 
+                noSpaceLine.includes('herebyrelease') || 
+                noSpaceLine.includes('mel/cdlitems')) {
                 break;
             }
         } else {
