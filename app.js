@@ -94,6 +94,40 @@ const getExtraFuel = () => (parseFloat(getDestEfob()) - num(flightData.final)).t
 const extraTime = '01:28';
 
 // Timezone offset, local time, and weather extractors
+function getPageTextWithNewlines(textContent) {
+    const items = textContent.items;
+    if (items.length === 0) return '';
+    
+    const validItems = items.filter(item => item.transform && item.transform.length >= 6);
+    
+    validItems.sort((a, b) => {
+        const yDiff = b.transform[5] - a.transform[5];
+        if (Math.abs(yDiff) > 3) {
+            return yDiff;
+        }
+        return a.transform[4] - b.transform[4];
+    });
+    
+    let text = '';
+    let lastY = null;
+    
+    validItems.forEach(item => {
+        const y = item.transform[5];
+        const str = item.str;
+        
+        if (lastY === null) {
+            text += str;
+        } else if (Math.abs(y - lastY) > 3) {
+            text += '\n' + str;
+        } else {
+            text += ' ' + str;
+        }
+        lastY = y;
+    });
+    
+    return text;
+}
+
 function getAirportOffset(icao) {
     if (!icao) return 0;
     const code = icao.toUpperCase();
@@ -176,16 +210,17 @@ function extractWeatherSection(fullText, headerName) {
     if (headerIdx === -1) return [];
     
     const remainingText = fullText.substring(headerIdx + headerName.length);
-    const firstDividerIdx = remainingText.indexOf('---------------------');
-    if (firstDividerIdx === -1) return [];
+    const firstDividerMatch = remainingText.match(/\-{5,}/);
+    if (!firstDividerMatch) return [];
     
-    const weatherText = remainingText.substring(firstDividerIdx + '---------------------'.length);
+    const weatherStartIdx = firstDividerMatch.index + firstDividerMatch[0].length;
+    const weatherText = remainingText.substring(weatherStartIdx);
     
     const lines = [];
     const rawLines = weatherText.split('\n');
     for (let i = 0; i < rawLines.length; i++) {
         const line = rawLines[i].trim();
-        if (line === '---------------------') {
+        if (line.match(/^\-{5,}$/)) {
             break;
         }
         if (headerName.toUpperCase() === 'ENROUTE WEATHER') {
@@ -1872,7 +1907,7 @@ if (fileInputEl) {
         for (let i = 1; i <= numPages; i++) {
             const page = await pdf.getPage(i);
             const textContent = await page.getTextContent();
-            const pageText = textContent.items.map(item => item.str).join(' ');
+            const pageText = getPageTextWithNewlines(textContent);
             fullText += pageText + '\n';
             setProgress(Math.round(40 + (i / numPages) * 45));
         }
