@@ -496,6 +496,56 @@ function parseTafLinesWithWindow(rawLines, windowHours, allowedIcaos = null) {
     return result;
 }
 
+function parseFlightPlanRoute(routeStr) {
+    let tokens = routeStr.split(/\s+/).filter(t => t.length > 0);
+    if (tokens.length > 0 && tokens[0].match(/^\-[NKM]\d{3,4}[FSAM]\d{3,4}/)) {
+        tokens.shift(); // remove the initial speed/level token
+    }
+    
+    // clean speed/level suffixes from waypoints, e.g. RBL/N0490F340 -> RBL
+    let cleanedTokens = tokens.map(t => t.split('/')[0]);
+    
+    function isWaypoint(t) {
+        if (t === 'DCT') return false;
+        if (t.match(/^\d{2}[NS]\d{3}[EW]$/i)) return true;
+        if (t.match(/^[A-Z]{2,5}$/i)) return true;
+        return false;
+    }
+    
+    function isAirway(t) {
+        if (t === 'DCT') return true;
+        if (t.match(/^[A-Z]\d+$/i)) return true;
+        if (t.match(/^[A-Z]+\d+[A-Z]*$/i)) return true;
+        return false;
+    }
+    
+    let routePairs = [];
+    let expecting = 'AWY';
+    let currentAwy = '';
+    
+    for (let i = 0; i < cleanedTokens.length; i++) {
+        let t = cleanedTokens[i];
+        if (expecting === 'AWY') {
+            if (isWaypoint(t) && !isAirway(t)) {
+                currentAwy = 'DCT';
+                routePairs.push({ airway: currentAwy, waypoint: t });
+                expecting = 'AWY';
+            } else {
+                currentAwy = t;
+                expecting = 'WPT';
+            }
+        } else {
+            if (isAirway(t) && !isWaypoint(t)) {
+                currentAwy = t;
+            } else {
+                routePairs.push({ airway: currentAwy, waypoint: t });
+                expecting = 'AWY';
+            }
+        }
+    }
+    return routePairs;
+}
+
 function extractWeatherSection(fullText, headerName) {
     const headerIdx = fullText.toUpperCase().indexOf(headerName.toUpperCase());
     if (headerIdx === -1) return [];
@@ -622,31 +672,7 @@ function updateDebugPanel() {
 }
 // --- Route Summary Data ---
 let routeScrollIndex = 0;
-const routeData = [
-    { airway: 'SUMMR2', waypoint: 'SCTRR' },
-    { airway: 'DIR', waypoint: 'SNS' },
-    { airway: 'DIR', waypoint: 'OAK' },
-    { airway: 'J3', waypoint: 'RBL' },
-    { airway: 'DIR', waypoint: 'UBG' },
-    { airway: 'DIR', waypoint: 'ARRIE' },
-    { airway: 'DIR', waypoint: 'GOVAD' },
-    { airway: 'DIR', waypoint: 'KATCH' },
-    { airway: 'B757', waypoint: 'CJAYY' },
-    { airway: 'DIR', waypoint: 'N58W160' },
-    { airway: 'DIR', waypoint: 'N57W170' },
-    { airway: 'DIR', waypoint: 'N55E180' },
-    { airway: 'DIR', waypoint: 'OPAKE' },
-    { airway: 'A342', waypoint: 'NUZAN' },
-    { airway: 'R220', waypoint: 'NODAN' },
-    { airway: 'R217', waypoint: 'ASTER' },
-    { airway: 'Y514', waypoint: 'SDE' },
-    { airway: 'Y512', waypoint: 'GTC' },
-    { airway: 'Y142', waypoint: 'SAMON' },
-    { airway: 'Y14', waypoint: 'SUGNO' },
-    { airway: 'Y16', waypoint: 'SAPRA' },
-    { airway: 'Y685', waypoint: 'GUKDO' },
-    { airway: 'DIR', waypoint: 'RKSI' }
-];
+let routeData = [];
 
 // --- Step Altitude Transition Data ---
 const stepAltData = [
@@ -1606,9 +1632,9 @@ function renderRteSummaryPage() {
         <div class="fms-row" style="margin-bottom: 4px;">
             <div class="fms-cell" style="justify-content: flex-start; gap: 8px; font-size: 0.9rem;">
                 <span class="text-white-fms">FROM</span>
-                <span class="text-green-fms" style="font-weight: bold; margin-right: 15px;">KLAX</span>
+                <span class="text-green-fms" style="font-weight: bold; margin-right: 15px;">${flightData.from || '----'}</span>
                 <span class="text-white-fms">TO</span>
-                <span class="text-green-fms" style="font-weight: bold;">RKSI</span>
+                <span class="text-green-fms" style="font-weight: bold;">${flightData.to || '----'}</span>
             </div>
         </div>
 
@@ -2428,6 +2454,30 @@ if (fileInputEl) {
         flightData.enrteWeatherRaw = extractWeatherSection(fullText, 'ENROUTE WEATHER');
         if (flightData.depWeatherRaw.length > 0 || flightData.arrWeatherRaw.length > 0) {
             matchedCount++;
+        }
+
+        // 21. FPL ROUTE
+        const fplMatch = fullText.match(/\(FPL-[\s\S]*?\)/);
+        if (fplMatch) {
+            const fplLines = fplMatch[0].split('\n').map(l => l.trim());
+            let routeStr = '';
+            let inRoute = false;
+            for (let i = 0; i < fplLines.length; i++) {
+                const line = fplLines[i];
+                if (line.match(/^\-[NKM]\d{3,4}[FSAM]\d{3,4}/)) {
+                    inRoute = true;
+                    routeStr += line + ' ';
+                } else if (inRoute) {
+                    if (line.startsWith('-')) {
+                        break;
+                    }
+                    routeStr += line + ' ';
+                }
+            }
+            if (routeStr) {
+                routeData = parseFlightPlanRoute(routeStr);
+                matchedCount++;
+            }
         }
 
         // Fallback calculations for TOW, LW, and FOD if not explicitly parsed from PDF
