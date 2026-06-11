@@ -32,7 +32,8 @@ const flightData = {
     final: '11.0',  
     finalTime: '00:30',
     tow: '1213.9',  
-    lw: '831.5'     
+    lw: '831.5',
+    fod: '46.4'
 };
 
 // --- Computed Values ---
@@ -43,10 +44,26 @@ let altnUtc = '06:29';
 // consistent after a PDF import or a manual edit.
 // EFOB DEST = (FOB - TAXI) - TRIP ; EFOB ALTN = EFOB DEST - ALTN ; EXTRA = EFOB DEST - FINAL
 const num = (v) => parseFloat(String(v).replace(/[^\d.\-]/g, '')) || 0;
-const getDestEfob = () => (num(flightData.fob) - num(flightData.taxi) - num(flightData.trip)).toFixed(1);
+const getDestEfob = () => {
+    if (flightData.fod !== undefined && flightData.fod !== null && flightData.fod !== '') {
+        return num(flightData.fod).toFixed(1);
+    }
+    return (num(flightData.fob) - num(flightData.taxi) - num(flightData.trip)).toFixed(1);
+};
 const getAltnEfob = () => (parseFloat(getDestEfob()) - num(flightData.altnFuel)).toFixed(1);
 const getExtraFuel = () => (parseFloat(getDestEfob()) - num(flightData.final)).toFixed(1);
 const extraTime = '01:28';
+
+function recalculateWeights() {
+    const zfw = num(flightData.zfw);
+    const fob = num(flightData.fob);
+    const taxi = num(flightData.taxi);
+    const trip = num(flightData.trip);
+    
+    flightData.tow = (zfw + fob - taxi).toFixed(1);
+    flightData.lw = (zfw + fob - taxi - trip).toFixed(1);
+    flightData.fod = (fob - taxi - trip).toFixed(1);
+}
 // --- Route Summary Data ---
 let routeScrollIndex = 0;
 const routeData = [
@@ -243,16 +260,16 @@ function getFuelTableHTML() {
             <div class="fuel-table-row">
                 <div class="text-white-fms">DEST <span class="text-green-fms">${flightData.to}</span></div>
                 <div class="text-green-fms" style="text-align: center;">${destUtc}</div>
-                <div class="text-green-fms" style="text-align: center;">${getDestEfob()}</div>
+                <div id="dest-efob-val" class="text-green-fms" style="text-align: center;">${getDestEfob()}</div>
                 <div>
-                    <div class="dest-min-fuel-box">${flightData.final}</div>
+                    <div id="dest-min-fuel-val" class="dest-min-fuel-box">${flightData.final}</div>
                 </div>
             </div>
 
             <div class="fuel-table-row">
                 <div class="text-white-fms">ALTN <span class="text-green-fms">${flightData.altn}</span></div>
                 <div class="text-green-fms" style="text-align: center;">${altnUtc}</div>
-                <div class="text-cyan-fms" style="text-align: center;">${getAltnEfob()}</div>
+                <div id="altn-efob-val" class="text-cyan-fms" style="text-align: center;">${getAltnEfob()}</div>
                 <div></div>
             </div>
 
@@ -277,7 +294,7 @@ function getFuelTableHTML() {
                         <span>TIME</span>
                     </div>
                     <div class="extra-inner">
-                        <span class="text-green-fms">${getExtraFuel()}</span>
+                        <span id="extra-fuel-val" class="text-green-fms">${getExtraFuel()}</span>
                         <span class="text-green-fms">${extraTime}</span>
                     </div>
                 </div>
@@ -1018,13 +1035,13 @@ function renderFuelLoadPage() {
                 <div class="cell-left" style="gap: 6px;">
                     <span class="fms-label">ZFW</span>
                     <div class="fms-val-box extracted-value" style="width: 130px;">
-                        <input type="text" value="${flightData.zfw}">
+                        <input type="text" value="${flightData.zfw}" data-field="zfw">
                     </div>
                 </div>
                 <div class="cell-right" style="gap: 6px;">
                     <span class="fms-label label-right" style="width: 80px; text-align: right;">ZFWCG</span>
                     <div class="fms-val-box white-text" style="width: 100px;">
-                        <input type="text" value="${flightData.zfwcg}">
+                        <input type="text" value="${flightData.zfwcg}" data-field="zfwcg">
                     </div>
                 </div>
             </div>
@@ -1036,7 +1053,7 @@ function renderFuelLoadPage() {
                 <div class="cell-left" style="gap: 6px;">
                     <span class="fms-label">FOB</span>
                     <div class="fms-val-box extracted-value" style="width: 130px;">
-                        <input type="text" value="${flightData.fob}">
+                        <input type="text" value="${flightData.fob}" data-field="fob">
                     </div>
                 </div>
             </div>
@@ -1050,13 +1067,13 @@ function renderFuelLoadPage() {
                 <div class="cell-left" style="gap: 6px;">
                     <span class="fms-label">TAXI</span>
                     <div class="fms-val-box extracted-value" style="width: 100px;">
-                        <input type="text" value="${flightData.taxi}">
+                        <input type="text" value="${flightData.taxi}" data-field="taxi">
                     </div>
                 </div>
                 <div class="cell-right" style="gap: 6px;">
                     <span class="fms-label label-right" style="width: 80px; text-align: right;">PAX NBR</span>
                     <div class="fms-val-box extracted-value" style="width: 100px;">
-                        <input type="text" value="${flightData.paxNbr}">
+                        <input type="text" value="${flightData.paxNbr}" data-field="paxNbr">
                     </div>
                 </div>
             </div>
@@ -1068,10 +1085,10 @@ function renderFuelLoadPage() {
                 <div class="cell-left" style="gap: 6px;">
                     <span class="fms-label">TRIP</span>
                     <div class="fms-val-box extracted-value" style="width: 100px;">
-                        <input type="text" value="${flightData.trip}">
+                        <input type="text" value="${flightData.trip}" data-field="trip">
                     </div>
                     <div class="fms-val-box extracted-value" style="width: 80px;">
-                        <input type="text" value="${flightData.tripTime}">
+                        <input type="text" value="${flightData.tripTime}" data-field="tripTime">
                     </div>
                 </div>
                 <div class="cell-right" style="gap: 6px;">
@@ -1089,10 +1106,10 @@ function renderFuelLoadPage() {
                 <div class="cell-left" style="gap: 6px;">
                     <span class="fms-label" style="font-size: 0.75rem;">RTE RSV</span>
                     <div class="fms-val-box extracted-value" style="width: 100px;">
-                        <input type="text" value="${flightData.rteRsv}">
+                        <input type="text" value="${flightData.rteRsv}" data-field="rteRsv">
                     </div>
                     <div class="fms-val-box white-text" style="width: 80px;">
-                        <input type="text" value="${flightData.rteRsvPct}">
+                        <input type="text" value="${flightData.rteRsvPct}" data-field="rteRsvPct">
                     </div>
                 </div>
                 <div class="cell-right" style="gap: 6px;">
@@ -1110,15 +1127,15 @@ function renderFuelLoadPage() {
                 <div class="cell-left" style="gap: 6px;">
                     <span class="fms-label">ALTN</span>
                     <div class="fms-val-box extracted-value" style="width: 100px;">
-                        <input type="text" value="${flightData.altnFuel}">
+                        <input type="text" value="${flightData.altnFuel}" data-field="altnFuel">
                     </div>
                     <div class="fms-val-box extracted-value" style="width: 80px;">
-                        <input type="text" value="${flightData.altnTime}">
+                        <input type="text" value="${flightData.altnTime}" data-field="altnTime">
                     </div>
                 </div>
                 <div class="cell-right" style="gap: 6px;">
                     <span class="fms-label label-right" style="width: 80px; text-align: right;">TOW</span>
-                    <div style="width: 100px; text-align: center; color: var(--text-green); font-weight: bold; font-size: 0.95rem;">
+                    <div id="tow-display-val" style="width: 100px; text-align: center; color: var(--text-green); font-weight: bold; font-size: 0.95rem;">
                         ${flightData.tow}
                     </div>
                 </div>
@@ -1131,15 +1148,15 @@ function renderFuelLoadPage() {
                 <div class="cell-left" style="gap: 6px;">
                     <span class="fms-label">FINAL</span>
                     <div class="fms-val-box cyan-text" style="width: 100px;">
-                        <input type="text" value="${flightData.final}">
+                        <input type="text" value="${flightData.final}" data-field="final">
                     </div>
                     <div class="fms-val-box cyan-text" style="width: 80px;">
-                        <input type="text" value="${flightData.finalTime}">
+                        <input type="text" value="${flightData.finalTime}" data-field="finalTime">
                     </div>
                 </div>
                 <div class="cell-right" style="gap: 6px;">
                     <span class="fms-label label-right" style="width: 80px; text-align: right;">LW</span>
-                    <div style="width: 100px; text-align: center; color: var(--text-green); font-weight: bold; font-size: 0.95rem;">
+                    <div id="lw-display-val" style="width: 100px; text-align: center; color: var(--text-green); font-weight: bold; font-size: 0.95rem;">
                         ${flightData.lw}
                     </div>
                 </div>
@@ -1244,6 +1261,30 @@ document.body.addEventListener('input', (e) => {
     const field = e.target.dataset?.field;
     if (field && field in flightData) {
         flightData[field] = e.target.value;
+        
+        // Recalculate weights if zfw, fob, taxi, trip, or final is updated
+        if (['zfw', 'fob', 'taxi', 'trip', 'final'].includes(field)) {
+            recalculateWeights();
+            
+            // Dynamically update read-only labels on the screen if elements exist
+            const towEl = document.getElementById('tow-display-val');
+            if (towEl) towEl.textContent = flightData.tow;
+            
+            const lwEl = document.getElementById('lw-display-val');
+            if (lwEl) lwEl.textContent = flightData.lw;
+            
+            const destEfobEl = document.getElementById('dest-efob-val');
+            if (destEfobEl) destEfobEl.textContent = getDestEfob();
+            
+            const altnEfobEl = document.getElementById('altn-efob-val');
+            if (altnEfobEl) altnEfobEl.textContent = getAltnEfob();
+            
+            const extraFuelEl = document.getElementById('extra-fuel-val');
+            if (extraFuelEl) extraFuelEl.textContent = getExtraFuel();
+            
+            const destMinFuelEl = document.getElementById('dest-min-fuel-val');
+            if (destMinFuelEl) destMinFuelEl.textContent = flightData.final;
+        }
     }
 });
 
@@ -1634,7 +1675,52 @@ if (fileInputEl) {
         const rampMatch = fullText.match(/RAMP\s*OUT\s+(\d{4})\b/i);
         if (rampMatch) { flightData.fob = toKlbs(rampMatch[1]); matchedCount++; }
 
-        // 10. ETD/ETA — "ETD KLAX 1710Z ETA RKSI 0612Z"
+        // 10. TRIP — e.g. "TRIP      03824  13.02" or "TRIP 3824 13:02"
+        const tripMatch = fullText.match(/TRIP\s+(\d{3,5})\s+(\d{2})[:\.]?(\d{2})\b/i) || 
+                          fullText.match(/TRIP\s*FUEL\s*[:\-]?\s*(\d{3,5})\s+(\d{2})[:\.]?(\d{2})\b/i);
+        if (tripMatch) {
+            flightData.trip = toKlbs(tripMatch[1]);
+            flightData.tripTime = tripMatch[2] + ':' + tripMatch[3];
+            matchedCount++;
+        }
+
+        // 11. PAX NBR — e.g. "PAX 485" or "PAX/BAGS 485"
+        const paxMatch = fullText.match(/PAX\/BAGS\s+(\d{1,3})\b/i) ||
+                         fullText.match(/PAX\s*\/?[#]?\s*(\d{1,3})\b/i);
+        if (paxMatch) {
+            flightData.paxNbr = paxMatch[1];
+            matchedCount++;
+        }
+
+        // 12. TOW — e.g. "TOW 12139" or "TOW 1213.9"
+        const towMatch = fullText.match(/\bTOW\s+(\d{4,5})\b/i) ||
+                         fullText.match(/\bTOW\s+(\d{3,4}\.\d)\b/i) ||
+                         fullText.match(/TOW\s*[:\-]?\s*(\d{4,5})\b/i);
+        if (towMatch) {
+            flightData.tow = towMatch[1].includes('.') ? parseFloat(towMatch[1]).toFixed(1) : toKlbs(towMatch[1]);
+            matchedCount++;
+        }
+
+        // 13. LW — e.g. "LW 08315" or "LDW 08315"
+        const lwMatch = fullText.match(/\b(?:LW|LDW|LAW)\s+(\d{4,5})\b/i) ||
+                        fullText.match(/\b(?:LW|LDW|LAW)\s+(\d{3,4}\.\d)\b/i) ||
+                        fullText.match(/(?:LW|LDW|LAW)\s*[:\-]?\s*(\d{4,5})\b/i);
+        if (lwMatch) {
+            flightData.lw = lwMatch[1].includes('.') ? parseFloat(lwMatch[1]).toFixed(1) : toKlbs(lwMatch[1]);
+            matchedCount++;
+        }
+
+        // 14. FOD (Fuel on Destination) for DEST EFOB
+        const fodMatch = fullText.match(/\bFOD\s+(\d{3,5})\b/i) || 
+                         fullText.match(/\bFOD\s*[A-Z]{4}\s+(\d{3,5})\b/i) ||
+                         fullText.match(/\bFOD\s*\/\s*[A-Z]{4}\s+(\d{3,5})\b/i) ||
+                         fullText.match(/\bFOD\s+(\d{1,3}\.\d)\b/i);
+        if (fodMatch) {
+            flightData.fod = fodMatch[1].includes('.') ? parseFloat(fodMatch[1]).toFixed(1) : toKlbs(fodMatch[1]);
+            matchedCount++;
+        }
+
+        // 15. ETD/ETA — "ETD KLAX 1710Z ETA RKSI 0612Z"
         const etaMatch = fullText.match(/ETA\s+[A-Z]{4}\s+(\d{2})(\d{2})Z/i);
         if (etaMatch) { destUtc = etaMatch[1] + ':' + etaMatch[2]; matchedCount++; }
 
