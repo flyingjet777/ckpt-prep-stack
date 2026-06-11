@@ -39,6 +39,14 @@ const flightData = {
 // Keep track of raw values parsed from PDF
 let lastImportedPdfData = null;
 
+function resetFlightData() {
+    for (let key in flightData) {
+        if (key === 'mode') flightData[key] = 'ECON';
+        else if (key === 'tropo') flightData[key] = '36090 FT';
+        else flightData[key] = '';
+    }
+}
+
 // --- Computed Values ---
 // destUtc is updated from the OFP "ETA ... Z" line on import.
 let destUtc = '06:12';
@@ -1659,6 +1667,8 @@ if (fileInputEl) {
 
         const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
         setProgress(40);
+
+        resetFlightData(); // Clear old data before parsing new PDF
 
         let fullText = '';
         const numPages = pdf.numPages;
