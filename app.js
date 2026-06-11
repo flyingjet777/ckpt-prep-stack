@@ -1757,7 +1757,7 @@ if (fileInputEl) {
         }
 
         // 8. ZFW — "ZFW 07851" (100 lbs) -> 785.1 klbs
-        const zfwMatch = fullText.match(/ZFW\s+(\d{4,5})\b/i);
+        const zfwMatch = fullText.match(/(?<![A-Z])ZFW\s+(\d{4,5})\b/i);
         if (zfwMatch) { flightData.zfw = toKlbs(zfwMatch[1]); matchedCount++; }
 
         // 9. Fuels — CONT / TAXI / RAMP OUT (all 100 lbs -> klbs)
@@ -1799,28 +1799,28 @@ if (fileInputEl) {
         }
 
         // 12. TOW — e.g. "TOW 12139" or "TOW 1213.9"
-        const towMatch = fullText.match(/TOW\s+(\d{4,5})\b/i) ||
-                         fullText.match(/TOW\s+(\d{3,4}\.\d)\b/i) ||
-                         fullText.match(/TOW\s*[:\-]?\s*(\d{4,5})\b/i);
+        const towMatch = fullText.match(/(?<![A-Z])TOW\s+(\d{4,5})\b/i) ||
+                         fullText.match(/(?<![A-Z])TOW\s+(\d{3,4}\.\d)\b/i) ||
+                         fullText.match(/(?<![A-Z])TOW\s*[:\-]?\s*(\d{4,5})\b/i);
         if (towMatch) {
             flightData.tow = towMatch[1].includes('.') ? parseFloat(towMatch[1]).toFixed(1) : toKlbs(towMatch[1]);
             matchedCount++;
         }
 
         // 13. LW — e.g. "LW 08315" or "LDW 08315"
-        const lwMatch = fullText.match(/(?:LW|LDW|LAW)\s+(\d{4,5})\b/i) ||
-                        fullText.match(/(?:LW|LDW|LAW)\s+(\d{3,4}\.\d)\b/i) ||
-                        fullText.match(/(?:LW|LDW|LAW)\s*[:\-]?\s*(\d{4,5})\b/i);
+        const lwMatch = fullText.match(/(?<![A-Z])(?:LW|LDW|LAW)\s+(\d{4,5})\b/i) ||
+                        fullText.match(/(?<![A-Z])(?:LW|LDW|LAW)\s+(\d{3,4}\.\d)\b/i) ||
+                        fullText.match(/(?<![A-Z])(?:LW|LDW|LAW)\s*[:\-]?\s*(\d{4,5})\b/i);
         if (lwMatch) {
             flightData.lw = lwMatch[1].includes('.') ? parseFloat(lwMatch[1]).toFixed(1) : toKlbs(lwMatch[1]);
             matchedCount++;
         }
 
         // 14. FOD (Fuel on Destination) for DEST EFOB
-        const fodMatch = fullText.match(/FOD\s+(\d{3,5})\b/i) || 
-                         fullText.match(/FOD\s*[A-Z]{4}\s+(\d{3,5})\b/i) ||
-                         fullText.match(/FOD\s*\/\s*[A-Z]{4}\s+(\d{3,5})\b/i) ||
-                         fullText.match(/FOD\s+(\d{1,3}\.\d)\b/i);
+        const fodMatch = fullText.match(/(?<![A-Z])FOD\s+(\d{3,5})\b/i) || 
+                         fullText.match(/(?<![A-Z])FOD\s*[A-Z]{4}\s+(\d{3,5})\b/i) ||
+                         fullText.match(/(?<![A-Z])FOD\s*\/\s*[A-Z]{4}\s+(\d{3,5})\b/i) ||
+                         fullText.match(/(?<![A-Z])FOD\s+(\d{1,3}\.\d)\b/i);
         if (fodMatch) {
             flightData.fod = fodMatch[1].includes('.') ? parseFloat(fodMatch[1]).toFixed(1) : toKlbs(fodMatch[1]);
             matchedCount++;
