@@ -59,6 +59,11 @@ function resetFlightData() {
         else flightData[key] = '';
     }
     melCdlData = [];
+    stepAltData.length = 0;
+    // Add default blank rows so the screen has visual placeholders when empty
+    stepAltData.push({ wpt: '--------', alt: '---', dist: '', time: '' });
+    stepAltData.push({ wpt: '--------', alt: '---', dist: '', time: '' });
+    stepAltScrollIndex = 0;
 }
 
 // --- Computed Values ---
@@ -847,13 +852,8 @@ let routeData = [];
 
 // --- Step Altitude Transition Data ---
 const stepAltData = [
-    { wpt: 'KLAX', alt: 'FL300', dist: '', time: '' },
-    { wpt: 'RBL', alt: 'FL340', dist: '211 NM', time: '00:45' },
-    { wpt: 'N55E180', alt: 'FL360', dist: '2360 NM', time: '04:55' },
-    { wpt: 'OPAKE', alt: 'FL380', dist: '3124 NM', time: '06:20' },
-    { wpt: 'NUZAN', alt: 'FL390', dist: '3561 NM', time: '07:15' },
-    { wpt: 'NOGAL', alt: 'FL400', dist: '4120 NM', time: '08:35' },
-    { wpt: 'SAMON', alt: 'FL380', dist: '4980 NM', time: '10:20' }
+    { wpt: '--------', alt: '---', dist: '', time: '' },
+    { wpt: '--------', alt: '---', dist: '', time: '' }
 ];
 let stepAltScrollIndex = 0;
 
