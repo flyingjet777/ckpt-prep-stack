@@ -1,39 +1,39 @@
 // Active flight planning extracted data
 const flightData = {
     // ACTIVE/INIT Page Values
-    fltNbr: 'AAR201', // Extracted
-    from: 'KLAX',    // Extracted
-    to: 'RKSI',      // Extracted
-    altn: 'RKSS',    // Extracted
+    fltNbr: '',
+    from: '',
+    to: '',
+    altn: '',
     cponyRte: '',     
     altnRte: '',      
-    crzFl: 'FL 300',  
-    crzTemp: '-49 °C',
+    crzFl: '',  
+    crzTemp: '',
     mode: 'ECON',
     tropo: '36090 FT',
-    ci: '65',          
-    tripWind: 'M031',   
-    apms: '+2.3 %',  
+    ci: '',          
+    tripWind: '',   
+    apms: '',  
     
     // FUEL & LOAD Page Values in "klbs" units
-    gw: '1213.9',   
-    cg: '28.5 %',
-    fob: '430.6',   
-    zfw: '785.1',   
-    zfwcg: '31.2 %',
-    taxi: '1.8',    
-    paxNbr: '485',
-    trip: '382.4',  
-    tripTime: '13:02',
-    rteRsv: '11.5', 
-    rteRsvPct: '3.0 %',
-    altnFuel: '9.2', 
-    altnTime: '00:17',
-    final: '11.0',  
-    finalTime: '00:30',
-    tow: '1213.9',  
-    lw: '831.5',
-    fod: '46.4'
+    gw: '',   
+    cg: '',
+    fob: '',   
+    zfw: '',   
+    zfwcg: '',
+    taxi: '',    
+    paxNbr: '',
+    trip: '',  
+    tripTime: '',
+    rteRsv: '', 
+    rteRsvPct: '',
+    altnFuel: '', 
+    altnTime: '',
+    final: '',  
+    finalTime: '',
+    tow: '',  
+    lw: '',
+    fod: ''
 };
 
 // Keep track of raw values parsed from PDF
@@ -1693,12 +1693,23 @@ if (fileInputEl) {
             matchedCount++;
         }
 
-        // 3. ALTN — "ALTN/RKSS 0092 00.17"  (also captures ALTN fuel in 100 lbs)
-        const altnMatch = fullText.match(/ALTN\s*\/\s*([A-Z]{4})\s+(\d{4})/i) ||
+        // 3. ALTN — "ALTN/RKSS 0092 00.17"  (also captures ALTN fuel and time)
+        const altnMatch = fullText.match(/ALTN\s*\/\s*([A-Z]{4})\s+(\d{3,5})\s+(\d{2})\s*[:\.]\s*(\d{2})/i) ||
+                          fullText.match(/ALTN\s*\/\s*([A-Z]{4})\s+(\d{3,5})/i) ||
                           fullText.match(/(?:ALTN|ALTERNATE)\s*[:\/\-]?\s*([A-Z]{4})\b/i);
         if (altnMatch) {
             flightData.altn = altnMatch[1].toUpperCase();
             if (altnMatch[2]) flightData.altnFuel = toKlbs(altnMatch[2]);
+            if (altnMatch[3] && altnMatch[4]) flightData.altnTime = altnMatch[3] + ':' + altnMatch[4];
+            matchedCount++;
+        }
+
+        // 3b. FINAL RES — "FINAL RES   0110  00.30"
+        const finalMatch = fullText.match(/FINAL\s+RES\s+(\d{3,5})\s+(\d{2})\s*[:\.]\s*(\d{2})/i) ||
+                           fullText.match(/FINAL\s*[:\-]?\s*(\d{3,5})\s+(\d{2})\s*[:\.]\s*(\d{2})/i);
+        if (finalMatch) {
+            flightData.final = toKlbs(finalMatch[1]);
+            flightData.finalTime = finalMatch[2] + ':' + finalMatch[3];
             matchedCount++;
         }
 
@@ -1736,7 +1747,7 @@ if (fileInputEl) {
         }
 
         // 8. ZFW — "ZFW 07851" (100 lbs) -> 785.1 klbs
-        const zfwMatch = fullText.match(/\bZFW\s+(\d{4,5})\b/i);
+        const zfwMatch = fullText.match(/ZFW\s+(\d{4,5})\b/i);
         if (zfwMatch) { flightData.zfw = toKlbs(zfwMatch[1]); matchedCount++; }
 
         // 9. Fuels — CONT / TAXI / RAMP OUT (all 100 lbs -> klbs)
@@ -1753,8 +1764,8 @@ if (fileInputEl) {
         if (rampMatch) { flightData.fob = toKlbs(rampMatch[1]); matchedCount++; }
 
         // 10. TRIP — e.g. "TRIP      03824  13.02" or "TRIP 3824 13:02"
-        const tripMatch = fullText.match(/TRIP\s+(\d{3,5})\s+(\d{2})[:\.](\d{2})\b/i) || 
-                          fullText.match(/TRIP\s*FUEL\s*[:\-]?\s*(\d{3,5})\s+(\d{2})[:\.](\d{2})\b/i);
+        const tripMatch = fullText.match(/TRIP\s+(\d{3,5})\s+(\d{2})\s*[:\.]\s*(\d{2})\b/i) || 
+                          fullText.match(/TRIP\s*FUEL\s*[:\-]?\s*(\d{3,5})\s+(\d{2})\s*[:\.]\s*(\d{2})\b/i);
         if (tripMatch) {
             flightData.trip = toKlbs(tripMatch[1]);
             flightData.tripTime = tripMatch[2] + ':' + tripMatch[3];
@@ -1762,7 +1773,7 @@ if (fileInputEl) {
         }
 
         // 11. PAX NBR — e.g. "PASSENGERS:  FIRST 0/0    BUSINESS 73/78    ECONOMY 412/417"
-        const paxMatch = fullText.match(/PASSENGERS:\s+FIRST\s+(\d+)\/\d+\s+BUSINESS\s+(\d+)\/\d+\s+ECONOMY\s+(\d+)\/\d+/i) ||
+        const paxMatch = fullText.match(/PASSENGERS:\s+FIRST\s+(\d+)\s*\/\s*\d+\s+BUSINESS\s+(\d+)\s*\/\s*\d+\s+ECONOMY\s+(\d+)\s*\/\s*\d+/i) ||
                          fullText.match(/PAX\/BAGS\s+(\d{1,3})\b/i) ||
                          fullText.match(/PAX\s*\/?[#]?\s*(\d{1,3})\b/i);
         if (paxMatch) {
@@ -1778,8 +1789,8 @@ if (fileInputEl) {
         }
 
         // 12. TOW — e.g. "TOW 12139" or "TOW 1213.9"
-        const towMatch = fullText.match(/\bTOW\s+(\d{4,5})\b/i) ||
-                         fullText.match(/\bTOW\s+(\d{3,4}\.\d)\b/i) ||
+        const towMatch = fullText.match(/TOW\s+(\d{4,5})\b/i) ||
+                         fullText.match(/TOW\s+(\d{3,4}\.\d)\b/i) ||
                          fullText.match(/TOW\s*[:\-]?\s*(\d{4,5})\b/i);
         if (towMatch) {
             flightData.tow = towMatch[1].includes('.') ? parseFloat(towMatch[1]).toFixed(1) : toKlbs(towMatch[1]);
@@ -1787,8 +1798,8 @@ if (fileInputEl) {
         }
 
         // 13. LW — e.g. "LW 08315" or "LDW 08315"
-        const lwMatch = fullText.match(/\b(?:LW|LDW|LAW)\s+(\d{4,5})\b/i) ||
-                        fullText.match(/\b(?:LW|LDW|LAW)\s+(\d{3,4}\.\d)\b/i) ||
+        const lwMatch = fullText.match(/(?:LW|LDW|LAW)\s+(\d{4,5})\b/i) ||
+                        fullText.match(/(?:LW|LDW|LAW)\s+(\d{3,4}\.\d)\b/i) ||
                         fullText.match(/(?:LW|LDW|LAW)\s*[:\-]?\s*(\d{4,5})\b/i);
         if (lwMatch) {
             flightData.lw = lwMatch[1].includes('.') ? parseFloat(lwMatch[1]).toFixed(1) : toKlbs(lwMatch[1]);
@@ -1796,10 +1807,10 @@ if (fileInputEl) {
         }
 
         // 14. FOD (Fuel on Destination) for DEST EFOB
-        const fodMatch = fullText.match(/\bFOD\s+(\d{3,5})\b/i) || 
-                         fullText.match(/\bFOD\s*[A-Z]{4}\s+(\d{3,5})\b/i) ||
-                         fullText.match(/\bFOD\s*\/\s*[A-Z]{4}\s+(\d{3,5})\b/i) ||
-                         fullText.match(/\bFOD\s+(\d{1,3}\.\d)\b/i);
+        const fodMatch = fullText.match(/FOD\s+(\d{3,5})\b/i) || 
+                         fullText.match(/FOD\s*[A-Z]{4}\s+(\d{3,5})\b/i) ||
+                         fullText.match(/FOD\s*\/\s*[A-Z]{4}\s+(\d{3,5})\b/i) ||
+                         fullText.match(/FOD\s+(\d{1,3}\.\d)\b/i);
         if (fodMatch) {
             flightData.fod = fodMatch[1].includes('.') ? parseFloat(fodMatch[1]).toFixed(1) : toKlbs(fodMatch[1]);
             matchedCount++;
