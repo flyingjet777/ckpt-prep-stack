@@ -1853,14 +1853,14 @@ if (fileInputEl) {
         const ccfMatch = fullText.match(/\bCCF\s+(\d{3,5})\b/i) ||
                          fullText.match(/\bCCF\s*[:\-]?\s*(\d{3,5})\b/i);
         if (ccfMatch) {
-            flightData.ccf = (parseInt(ccfMatch[1], 10) * 100).toString();
+            flightData.ccf = parseInt(ccfMatch[1], 10).toString();
             matchedCount++;
         }
 
         const tankMatch = fullText.match(/TANK(?:ERING)?\s+(\d{3,5})\b/i) ||
                           fullText.match(/TANKRG\s*[:\-]?\s*(\d{3,5})\b/i);
         if (tankMatch) {
-            flightData.tank = (parseInt(tankMatch[1], 10) * 100).toString();
+            flightData.tank = parseInt(tankMatch[1], 10).toString();
             matchedCount++;
         }
 
