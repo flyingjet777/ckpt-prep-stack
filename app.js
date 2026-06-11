@@ -2077,16 +2077,20 @@ function renderStepAltsPage() {
         </div>
 
         <!-- Max SR/Turb Point Box -->
-        <div style="border: 1.5px solid #2f3542; border-radius: 4px; padding: 10px; position: relative; margin-top: 6px; margin-bottom: 6px; background-color: #12141a;">
+        <div style="border: 1.5px solid #2f3542; border-radius: 4px; padding: 10px; position: relative; margin-top: 6px; margin-bottom: 6px; background-color: #12141a; display: flex; align-items: center; justify-content: space-between; gap: 8px;">
             <span style="position: absolute; top: -8px; left: 10px; background-color: var(--fms-screen-bg); padding: 0 6px; font-size: 0.65rem; color: var(--text-gray); font-weight: bold; letter-spacing: 0.5px;">MAX SR/TURB POINT</span>
-            <div style="display: flex; flex-direction: column; gap: 6px; font-size: 0.72rem; font-weight: bold; max-height: 80px; overflow-y: auto; padding-right: 4px;">
+            <div id="turb-scroll-container" style="display: flex; flex-direction: column; gap: 6px; font-size: 0.72rem; font-weight: bold; max-height: 80px; overflow-y: auto; padding-right: 4px; flex-grow: 1; scroll-behavior: smooth;">
                 ${zonesHTML}
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 4px; flex-shrink: 0;">
+                <button class="fms-btn-grey fms-btn-scroll" id="btn-turb-scroll-up" style="width: 34px; height: 26px; font-size: 0.6rem; padding: 2px; border: 1.5px solid #ffffff !important;">▲▲</button>
+                <button class="fms-btn-grey fms-btn-scroll" id="btn-turb-scroll-down" style="width: 34px; height: 26px; font-size: 0.6rem; padding: 2px; border: 1.5px solid #ffffff !important;">▼▼</button>
             </div>
         </div>
 
         <!-- Bottom Actions Row -->
         <div class="fms-row" style="margin-top: auto; padding-bottom: 2px; justify-content: flex-start; align-items: flex-end;">
-            <button class="msg-btn btn-return" id="btn-return" style="height: 28px; width: 55px; font-size: 0.68rem; padding: 2px;">RETURN</button>
+            <button class="msg-btn btn-return" id="btn-return" style="height: 28px; width: 55px; font-size: 0.68rem; padding: 2px; border: 1.5px solid #ffffff !important;">RETURN</button>
         </div>
     `;
     updateStepAltsTableOnly();
@@ -2304,6 +2308,22 @@ document.body.addEventListener('click', (e) => {
         if (stepAltScrollIndex > 0) {
             stepAltScrollIndex--;
             updateStepAltsTableOnly();
+        }
+    }
+
+    // Scroll up click for Turbulence Point Container
+    if (e.target.closest('#btn-turb-scroll-up')) {
+        const container = document.getElementById('turb-scroll-container');
+        if (container) {
+            container.scrollTop -= 24;
+        }
+    }
+
+    // Scroll down click for Turbulence Point Container
+    if (e.target.closest('#btn-turb-scroll-down')) {
+        const container = document.getElementById('turb-scroll-container');
+        if (container) {
+            container.scrollTop += 24;
         }
     }
 
