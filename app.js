@@ -1676,19 +1676,27 @@ if (fileInputEl) {
         if (rampMatch) { flightData.fob = toKlbs(rampMatch[1]); matchedCount++; }
 
         // 10. TRIP — e.g. "TRIP      03824  13.02" or "TRIP 3824 13:02"
-        const tripMatch = fullText.match(/TRIP\s+(\d{3,5})\s+(\d{2})[:\.]?(\d{2})\b/i) || 
-                          fullText.match(/TRIP\s*FUEL\s*[:\-]?\s*(\d{3,5})\s+(\d{2})[:\.]?(\d{2})\b/i);
+        const tripMatch = fullText.match(/TRIP\s+(\d{3,5})\s+(\d{2})[:\.](\d{2})\b/i) || 
+                          fullText.match(/TRIP\s*FUEL\s*[:\-]?\s*(\d{3,5})\s+(\d{2})[:\.](\d{2})\b/i);
         if (tripMatch) {
             flightData.trip = toKlbs(tripMatch[1]);
             flightData.tripTime = tripMatch[2] + ':' + tripMatch[3];
             matchedCount++;
         }
 
-        // 11. PAX NBR — e.g. "PAX 485" or "PAX/BAGS 485"
-        const paxMatch = fullText.match(/PAX\/BAGS\s+(\d{1,3})\b/i) ||
+        // 11. PAX NBR — e.g. "PASSENGERS:  FIRST 0/0    BUSINESS 73/78    ECONOMY 412/417"
+        const paxMatch = fullText.match(/PASSENGERS:\s+FIRST\s+(\d+)\/\d+\s+BUSINESS\s+(\d+)\/\d+\s+ECONOMY\s+(\d+)\/\d+/i) ||
+                         fullText.match(/PAX\/BAGS\s+(\d{1,3})\b/i) ||
                          fullText.match(/PAX\s*\/?[#]?\s*(\d{1,3})\b/i);
         if (paxMatch) {
-            flightData.paxNbr = paxMatch[1];
+            if (paxMatch[0].toUpperCase().includes('PASSENGERS')) {
+                const first = parseInt(paxMatch[1], 10);
+                const business = parseInt(paxMatch[2], 10);
+                const economy = parseInt(paxMatch[3], 10);
+                flightData.paxNbr = String(first + business + economy);
+            } else {
+                flightData.paxNbr = paxMatch[1];
+            }
             matchedCount++;
         }
 
@@ -1723,6 +1731,17 @@ if (fileInputEl) {
         // 15. ETD/ETA — "ETD KLAX 1710Z ETA RKSI 0612Z"
         const etaMatch = fullText.match(/ETA\s+[A-Z]{4}\s+(\d{2})(\d{2})Z/i);
         if (etaMatch) { destUtc = etaMatch[1] + ':' + etaMatch[2]; matchedCount++; }
+
+        // Fallback calculations for TOW, LW, and FOD if not explicitly parsed from PDF
+        if (!towMatch && (zfwMatch || rampMatch || taxiMatch)) {
+            flightData.tow = (num(flightData.zfw) + num(flightData.fob) - num(flightData.taxi)).toFixed(1);
+        }
+        if (!lwMatch) {
+            flightData.lw = (num(flightData.tow) - num(flightData.trip)).toFixed(1);
+        }
+        if (!fodMatch) {
+            flightData.fod = (num(flightData.fob) - num(flightData.taxi) - num(flightData.trip)).toFixed(1);
+        }
 
         setProgress(100);
 
