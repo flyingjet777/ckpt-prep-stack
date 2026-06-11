@@ -36,6 +36,9 @@ const flightData = {
     fod: '46.4'
 };
 
+// Keep track of raw values parsed from PDF
+let lastImportedPdfData = null;
+
 // --- Computed Values ---
 // destUtc is updated from the OFP "ETA ... Z" line on import.
 let destUtc = '06:12';
@@ -63,6 +66,77 @@ function recalculateWeights() {
     flightData.tow = (zfw + fob - taxi).toFixed(1);
     flightData.lw = (zfw + fob - taxi - trip).toFixed(1);
     flightData.fod = (fob - taxi - trip).toFixed(1);
+}
+
+function updateDebugPanel() {
+    const debugContent = document.getElementById('pdf-debug-content');
+    if (!debugContent) return;
+    
+    if (!lastImportedPdfData) {
+        debugContent.innerHTML = `<div class="debug-placeholder">No PDF imported yet.<br>Click IMPORT on the FMS screen.</div>`;
+        return;
+    }
+    
+    const fields = [
+        { label: 'FLT NBR', key: 'fltNbr' },
+        { label: 'FROM', key: 'from' },
+        { label: 'TO', key: 'to' },
+        { label: 'ALTN', key: 'altn' },
+        { label: 'CRZ FL', key: 'crzFl' },
+        { label: 'CRZ TEMP', key: 'crzTemp' },
+        { label: 'CI', key: 'ci' },
+        { label: 'TRIP WIND', key: 'tripWind' },
+        { label: 'APMS', key: 'apms' },
+        { label: 'ZFW', key: 'zfw' },
+        { label: 'ZFWCG', key: 'zfwcg' },
+        { label: 'FOB', key: 'fob' },
+        { label: 'TAXI', key: 'taxi' },
+        { label: 'PAX NBR', key: 'paxNbr' },
+        { label: 'TRIP FUEL', key: 'trip' },
+        { label: 'TRIP TIME', key: 'tripTime' },
+        { label: 'ALTN FUEL', key: 'altnFuel' },
+        { label: 'ALTN TIME', key: 'altnTime' },
+        { label: 'FINAL FUEL', key: 'final' },
+        { label: 'FINAL TIME', key: 'finalTime' },
+        { label: 'TOW', key: 'tow' },
+        { label: 'LW', key: 'lw' },
+        { label: 'FOD (DEST)', key: 'fod' }
+    ];
+    
+    let html = `
+        <table class="debug-table">
+            <thead>
+                <tr>
+                    <th style="width: 38%; text-align: left;">FIELD</th>
+                    <th style="width: 31%; text-align: center;">PDF</th>
+                    <th style="width: 31%; text-align: center;">ACTIVE</th>
+                </tr>
+            </thead>
+            <tbody>
+    `;
+    
+    fields.forEach(f => {
+        const pdfVal = lastImportedPdfData[f.key] !== undefined ? lastImportedPdfData[f.key] : '-';
+        let activeVal = flightData[f.key] !== undefined ? flightData[f.key] : '-';
+        
+        const isMismatch = String(pdfVal).trim() !== String(activeVal).trim();
+        const rowClass = isMismatch ? 'class="debug-mismatch"' : '';
+        
+        html += `
+            <tr ${rowClass}>
+                <td class="debug-field-name">${f.label}</td>
+                <td class="debug-pdf-val">${pdfVal}</td>
+                <td class="debug-active-val">${activeVal}</td>
+            </tr>
+        `;
+    });
+    
+    html += `
+            </tbody>
+        </table>
+    `;
+    
+    debugContent.innerHTML = html;
 }
 // --- Route Summary Data ---
 let routeScrollIndex = 0;
@@ -1285,6 +1359,9 @@ document.body.addEventListener('input', (e) => {
             const destMinFuelEl = document.getElementById('dest-min-fuel-val');
             if (destMinFuelEl) destMinFuelEl.textContent = flightData.final;
         }
+        
+        // Update comparison debug panel
+        updateDebugPanel();
     }
 });
 
@@ -1751,9 +1828,33 @@ if (fileInputEl) {
             return;
         }
 
-        if (pageTitle) {
-            pageTitle.innerHTML = `<span style="color: var(--text-green);">IMPORT SUCCESS (${matchedCount} FIELDS)</span>`;
-        }
+        // Save raw parsed data snapshot for debug comparison panel
+        lastImportedPdfData = {
+            fltNbr: flightData.fltNbr,
+            from: flightData.from,
+            to: flightData.to,
+            altn: flightData.altn,
+            crzFl: flightData.crzFl,
+            crzTemp: flightData.crzTemp,
+            ci: flightData.ci,
+            tripWind: flightData.tripWind,
+            apms: flightData.apms,
+            zfw: flightData.zfw,
+            zfwcg: flightData.zfwcg,
+            fob: flightData.fob,
+            taxi: flightData.taxi,
+            paxNbr: flightData.paxNbr,
+            trip: flightData.trip,
+            tripTime: flightData.tripTime,
+            altnFuel: flightData.altnFuel,
+            altnTime: flightData.altnTime,
+            final: flightData.final,
+            finalTime: flightData.finalTime,
+            tow: flightData.tow,
+            lw: flightData.lw,
+            fod: flightData.fod
+        };
+        updateDebugPanel();
 
         updateHeaderFltNbr();
 
@@ -1769,7 +1870,7 @@ if (fileInputEl) {
 }
 
 function adjustBezelScale() {
-    const bezelWidth = 580;
+    const bezelWidth = 930; // 580px (bezel) + 30px (gap) + 320px (debug panel)
     const bezelHeight = 740;
     const padding = 20; // safe area padding
     
@@ -1789,10 +1890,14 @@ function adjustBezelScale() {
     document.body.style.setProperty('--scale', scale);
 }
 
-// Attach listeners for scaling
+// Attach listeners for scaling and panels
 window.addEventListener('resize', adjustBezelScale);
-window.addEventListener('DOMContentLoaded', adjustBezelScale);
+window.addEventListener('DOMContentLoaded', () => {
+    adjustBezelScale();
+    updateDebugPanel();
+});
 adjustBezelScale();
+updateDebugPanel();
 // Run a small delay to handle iPad Safari layout quirks on load
 setTimeout(adjustBezelScale, 100);
 setTimeout(adjustBezelScale, 500);
