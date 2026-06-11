@@ -423,11 +423,17 @@ function renderInitPage() {
             <div class="fms-cell" style="justify-content: space-between;">
                 <div class="cell-left" style="gap: 6px;">
                     <span class="fms-label">FLT NBR</span>
-                    <div class="fms-val-box extracted-value">
-                        <input type="text" value="${flightData.fltNbr}" id="input-flt-nbr" style="width: 70px;">
+                    <div class="fms-val-box extracted-value flt-nbr-box">
+                        <input type="text" value="${flightData.fltNbr}" id="input-flt-nbr" style="width: 100%;">
                     </div>
                 </div>
-                <div class="cell-right" style="gap: 10px;">
+                <div class="cell-left" style="gap: 6px; margin-left: 0px;">
+                    <span class="fms-label" style="width: 32px; margin-right: 0px;">ACFT</span>
+                    <div class="fms-val-box extracted-value acft-box">
+                        <input type="text" value="${flightData.acftReg}" data-field="acftReg" style="width: 100%;">
+                    </div>
+                </div>
+                <div class="cell-right" style="gap: 6px;">
                     <button class="fms-btn-grey acft-status-btn" style="border-color: var(--text-green); color: var(--text-green);">APMS ${flightData.apms.replace(' %', '')}</button>
                     <label for="pdf-file-input" class="fms-btn-grey cpny-request-btn" style="border-color: var(--text-cyan); color: var(--text-cyan); font-size: 0.9rem; font-weight: bold; display: flex; justify-content: center; align-items: center; cursor: pointer; box-sizing: border-box;">IMPORT</label>
                 </div>

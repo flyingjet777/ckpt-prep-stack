@@ -295,11 +295,14 @@ body {
 }
 
 /* First Row proportions */
-.row-flt-nbr .fms-val-box {
-    width: 135px !important;
+.row-flt-nbr .flt-nbr-box {
+    width: 80px !important;
+}
+.row-flt-nbr .acft-box {
+    width: 75px !important;
 }
 .row-flt-nbr .acft-status-btn {
-    width: 110px !important;
+    width: 104px !important;
 }
 .row-flt-nbr .cpny-request-btn {
     width: 115px !important;
