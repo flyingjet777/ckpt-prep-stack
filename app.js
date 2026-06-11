@@ -1077,15 +1077,15 @@ function renderInitPage() {
                         <input type="text" value="${flightData.fltNbr}" id="input-flt-nbr" style="width: 100%;">
                     </div>
                 </div>
-                <div class="cell-left" style="gap: 6px; margin-left: 20px;">
+                <div class="cell-left" style="gap: 6px; margin-left: 0px;">
                     <span class="fms-label" style="width: 32px; margin-right: 0px;">ACFT</span>
                     <div class="fms-val-box extracted-value acft-box">
                         <input type="text" value="${flightData.acftReg}" data-field="acftReg" style="width: 100%;">
                     </div>
                 </div>
-                <div class="cell-right" style="gap: 6px; display: flex; flex-direction: column; align-items: flex-end; margin-top: 14px;">
-                    <label for="pdf-file-input" class="fms-btn-grey cpny-request-btn" style="border-color: var(--text-cyan); color: var(--text-cyan); font-size: 0.9rem; font-weight: bold; display: flex; justify-content: center; align-items: center; cursor: pointer; box-sizing: border-box; margin-bottom: 4px;">IMPORT</label>
-                    <button class="fms-btn-grey acft-status-btn" style="border-color: var(--text-green); color: var(--text-green); width: 100%; text-align: center;">APMS ${flightData.apms.replace(' %', '')}</button>
+                <div class="cell-right" style="gap: 6px;">
+                    <button class="fms-btn-grey acft-status-btn" style="border-color: var(--text-green); color: var(--text-green);">APMS ${flightData.apms.replace(' %', '')}</button>
+                    <label for="pdf-file-input" class="fms-btn-grey cpny-request-btn" style="border-color: var(--text-cyan); color: var(--text-cyan); font-size: 0.9rem; font-weight: bold; display: flex; justify-content: center; align-items: center; cursor: pointer; box-sizing: border-box;">IMPORT</label>
                 </div>
             </div>
         </div>
