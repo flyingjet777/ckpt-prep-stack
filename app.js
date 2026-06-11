@@ -31,9 +31,12 @@ const flightData = {
     altnTime: '',
     final: '',  
     finalTime: '',
+    finalTime: '',
     tow: '',  
     lw: '',
-    fod: ''
+    fod: '',
+    ccf: '',
+    tank: ''
 };
 
 // Keep track of raw values parsed from PDF
@@ -379,9 +382,9 @@ function getFuelTableHTML() {
                 <div class="dispatch-notes-col" style="width: 280px; text-align: left; line-height: 1.2;">
                     <div style="font-size: 0.85rem; color: var(--text-white); font-weight: bold; margin-bottom: 2px;">DISPATCH NOTES</div>
                     <div style="font-size: 0.85rem; font-weight: bold;">
-                        <span class="text-green-fms">CCF : 800 LBS</span> in DISC FUEL<br>
+                        <span class="text-green-fms">CCF : ${flightData.ccf || '0'} LBS</span> in DISC FUEL<br>
                         <span style="font-size: 0.75rem; color: var(--text-gray);">(DUE TO ENROUTE CB/TS, TURB)</span><br>
-                        <span class="text-green-fms">TANKRG : 000 LBS</span>
+                        <span class="text-green-fms">TANKRG : ${flightData.tank || '0'} LBS</span>
                     </div>
                 </div>
                 <div style="width: 0 !important; margin: 0; padding: 0;"></div>
@@ -1843,6 +1846,21 @@ if (fileInputEl) {
                          fullText.match(/(?<![A-Z])FOD\s+(\d{1,3}\.\d)\b/i);
         if (fodMatch) {
             flightData.fod = fodMatch[1].includes('.') ? parseFloat(fodMatch[1]).toFixed(1) : toKlbs(fodMatch[1]);
+            matchedCount++;
+        }
+
+        // 15. CCF & TANKERING
+        const ccfMatch = fullText.match(/\bCCF\s+(\d{3,5})\b/i) ||
+                         fullText.match(/\bCCF\s*[:\-]?\s*(\d{3,5})\b/i);
+        if (ccfMatch) {
+            flightData.ccf = (parseInt(ccfMatch[1], 10) * 100).toString();
+            matchedCount++;
+        }
+
+        const tankMatch = fullText.match(/TANK(?:ERING)?\s+(\d{3,5})\b/i) ||
+                          fullText.match(/TANKRG\s*[:\-]?\s*(\d{3,5})\b/i);
+        if (tankMatch) {
+            flightData.tank = (parseInt(tankMatch[1], 10) * 100).toString();
             matchedCount++;
         }
 
