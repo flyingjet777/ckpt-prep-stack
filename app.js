@@ -49,8 +49,25 @@ function resetFlightData() {
 
 // --- Computed Values ---
 // destUtc is updated from the OFP "ETA ... Z" line on import.
-let destUtc = '06:12';
-let altnUtc = '06:29';
+let destUtc = '';
+
+const addTimeStr = (t1, t2) => {
+    if (!t1 || !t2) return t1 || t2 || '';
+    const [h1, m1] = t1.split(':').map(Number);
+    const [h2, m2] = t2.split(':').map(Number);
+    if (isNaN(h1) || isNaN(m1) || isNaN(h2) || isNaN(m2)) return '';
+    let totalMins = m1 + m2;
+    let extraHour = Math.floor(totalMins / 60);
+    let finalMins = totalMins % 60;
+    let finalHours = (h1 + h2 + extraHour) % 24;
+    return String(finalHours).padStart(2, '0') + ':' + String(finalMins).padStart(2, '0');
+};
+
+const getAltnUtc = () => addTimeStr(destUtc, flightData.altnTime);
+const getDestMinFuel = () => {
+    const f = num(flightData.final);
+    return f > 0 ? (f * 1.3).toFixed(1) : '';
+};
 // EFOB / EXTRA are derived from current flightData so they stay
 // consistent after a PDF import or a manual edit.
 // EFOB DEST = (FOB - TAXI) - TRIP ; EFOB ALTN = EFOB DEST - ALTN ; EXTRA = EFOB DEST - FINAL
@@ -341,16 +358,16 @@ function getFuelTableHTML() {
             
             <div class="fuel-table-row">
                 <div class="text-white-fms">DEST <span class="text-green-fms">${flightData.to}</span></div>
-                <div class="text-green-fms" style="text-align: center;">${destUtc}</div>
+                <div class="text-green-fms" style="text-align: center;" id="dest-utc-val">${destUtc}</div>
                 <div id="dest-efob-val" class="text-green-fms" style="text-align: center;">${getDestEfob()}</div>
                 <div>
-                    <div id="dest-min-fuel-val" class="dest-min-fuel-box">${flightData.final}</div>
+                    <div id="dest-min-fuel-val" class="dest-min-fuel-box">${getDestMinFuel()}</div>
                 </div>
             </div>
 
             <div class="fuel-table-row">
                 <div class="text-white-fms">ALTN <span class="text-green-fms">${flightData.altn}</span></div>
-                <div class="text-green-fms" style="text-align: center;">${altnUtc}</div>
+                <div class="text-green-fms" style="text-align: center;" id="altn-utc-val">${getAltnUtc()}</div>
                 <div id="altn-efob-val" class="text-cyan-fms" style="text-align: center;">${getAltnEfob()}</div>
                 <div></div>
             </div>
@@ -1344,8 +1361,8 @@ document.body.addEventListener('input', (e) => {
     if (field && field in flightData) {
         flightData[field] = e.target.value;
         
-        // Recalculate weights if zfw, fob, taxi, trip, or final is updated
-        if (['zfw', 'fob', 'taxi', 'trip', 'final'].includes(field)) {
+        // Recalculate weights if zfw, fob, taxi, trip, final, or altnTime is updated
+        if (['zfw', 'fob', 'taxi', 'trip', 'final', 'altnTime'].includes(field)) {
             recalculateWeights();
             
             // Dynamically update read-only labels on the screen if elements exist
@@ -1365,7 +1382,10 @@ document.body.addEventListener('input', (e) => {
             if (extraFuelEl) extraFuelEl.textContent = getExtraFuel();
             
             const destMinFuelEl = document.getElementById('dest-min-fuel-val');
-            if (destMinFuelEl) destMinFuelEl.textContent = flightData.final;
+            if (destMinFuelEl) destMinFuelEl.textContent = getDestMinFuel();
+            
+            const altnUtcEl = document.getElementById('altn-utc-val');
+            if (altnUtcEl) altnUtcEl.textContent = getAltnUtc();
         }
         
         // Update comparison debug panel
