@@ -1083,7 +1083,7 @@ function renderInitPage() {
                         <input type="text" value="${flightData.acftReg}" data-field="acftReg" style="width: 100%;">
                     </div>
                 </div>
-                <div class="cell-right" style="gap: 6px; display: flex; flex-direction: column; align-items: flex-end; margin-top: 14px;">
+                <div class="cell-right" style="gap: 6px; display: flex; flex-direction: column; align-items: flex-end; margin-top: 24px;">
                     <label for="pdf-file-input" class="fms-btn-grey cpny-request-btn" style="border-color: var(--text-cyan); color: var(--text-cyan); font-size: 0.9rem; font-weight: bold; display: flex; justify-content: center; align-items: center; cursor: pointer; box-sizing: border-box; margin-bottom: 4px;">IMPORT</label>
                     <button class="fms-btn-grey acft-status-btn" style="border-color: var(--text-green); color: var(--text-green); width: 100%; text-align: center;">APMS ${flightData.apms.replace(' %', '')}</button>
                 </div>
