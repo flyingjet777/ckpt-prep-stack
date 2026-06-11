@@ -2676,6 +2676,7 @@ if (fileInputEl) {
                 const wptsForTurb = [];
                 const coordRe = /^([A-Z0-9]{2,10})\s+[WE]\d{2,3}\s+\d{1,2}\.\d\s+\d{3}\s+\/\s+(?:\d{2,3}|\.\.)\s+(?:\d{3,4}|\.\.\.)\s+(\d{2}\.\d{2})\s+(\d{4})\//;
                 const srRe = /\b\d{5}(?:[PM]\d{3}|\s+\d{3})\s+(\d{2})\s+(\d{3})\b/;
+                const lines = fullText.split('\n');
                 for (let i = 0; i < lines.length; i++) {
                     const lineStr = lines[i].trim();
                     const matchCoord = lineStr.match(coordRe);
@@ -2771,12 +2772,12 @@ function adjustBezelScale() {
     let scale;
     
     if (isLandscape) {
-        scale = Math.min((winW - padding) / bezelHeight, (winH - padding) / bezelWidth);
-        document.body.classList.add('rotated-landscape');
+        scale = (winH - padding) / bezelHeight;
     } else {
         scale = (winW - padding) / bezelWidth;
-        document.body.classList.remove('rotated-landscape');
     }
+    
+    document.body.classList.remove('rotated-landscape');
     
     const minScale = 0.5;
     if (scale < minScale) {

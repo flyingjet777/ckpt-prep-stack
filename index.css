@@ -669,11 +669,3 @@ body {
     border-color: #ffffff !important;
 }
 
-body.rotated-landscape {
-    overflow: hidden;
-}
-
-body.rotated-landscape .app-container {
-    transform: rotate(-90deg) scale(var(--scale));
-}
-
