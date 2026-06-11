@@ -546,7 +546,44 @@ function parseFlightPlanRoute(routeStr) {
     return routePairs;
 }
 
-function parseStepAlts(routeStr, fromAirport) {
+function findWaypointDistTime(fullText, wptName) {
+    if (!fullText || !wptName) return null;
+    const lines = fullText.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (line.startsWith(wptName)) {
+            const match = line.match(/(\d{2})\.(\d{2})\s+(\d{3,4})\//);
+            if (match) {
+                return {
+                    hours: parseInt(match[1], 10),
+                    minutes: parseInt(match[2], 10),
+                    dist: parseInt(match[3], 10)
+                };
+            }
+        }
+    }
+    return null;
+}
+
+function addTimeToEtd(etdStr, elapsedHours, elapsedMinutes) {
+    if (!etdStr) return '---';
+    const parts = etdStr.split(':');
+    if (parts.length !== 2) return '---';
+    
+    let hours = parseInt(parts[0], 10);
+    let minutes = parseInt(parts[1], 10);
+    
+    minutes += elapsedMinutes;
+    hours += elapsedHours + Math.floor(minutes / 60);
+    minutes = minutes % 60;
+    hours = hours % 24;
+    
+    const hStr = String(hours).padStart(2, '0');
+    const mStr = String(minutes).padStart(2, '0');
+    return `${hStr}:${mStr}`;
+}
+
+function parseStepAlts(routeStr, fromAirport, fullText) {
     let tokens = routeStr.split(/\s+/).filter(t => t.length > 0);
     let initialFL = 'FL350';
     if (tokens.length > 0 && tokens[0].match(/^\-[NKM]\d{3,4}[FSAM]\d{3,4}/)) {
@@ -560,17 +597,26 @@ function parseStepAlts(routeStr, fromAirport) {
         wpt: fromAirport || '----',
         alt: initialFL,
         dist: '---',
-        time: '---'
+        time: flightData.etd || '---'
     });
     for (let i = 0; i < tokens.length; i++) {
         const token = tokens[i];
         const match = token.match(/^([A-Z0-9]+)\/[NKM]\d{3,4}([FSAM])(\d{3,4})/i);
         if (match) {
+            const wpt = match[1].toUpperCase();
+            const alt = 'FL' + match[3];
+            let dist = '---';
+            let time = '---';
+            const info = findWaypointDistTime(fullText, wpt);
+            if (info) {
+                dist = `${info.dist} NM`;
+                time = addTimeToEtd(flightData.etd, info.hours, info.minutes);
+            }
             steps.push({
-                wpt: match[1].toUpperCase(),
-                alt: 'FL' + match[3],
-                dist: '---',
-                time: '---'
+                wpt: wpt,
+                alt: alt,
+                dist: dist,
+                time: time
             });
         }
     }
