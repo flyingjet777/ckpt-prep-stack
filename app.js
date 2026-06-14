@@ -29,12 +29,12 @@ const flightData = {
     rteRsvPct: '',
     altnFuel: '', 
     altnTime: '',
-    final: '',  
+    final: '',
     finalTime: '',
-    finalTime: '',
-    tow: '',  
+    tow: '',
     lw: '',
     fod: '',
+    ccf: '',
     tank: '',
     acftReg: '',
     etd: '',
@@ -44,7 +44,13 @@ const flightData = {
     arrWeatherRaw: [],
     altnWeatherRaw: [],
     enrteWeatherRaw: [],
-    turbZones: null
+    turbZones: null,
+    depNotamEntries: [],
+    arrNotamEntries: [],
+    altnNotamEntries: [],
+    depRunwayInfo: '',
+    arrRunwayInfo: '',
+    altnRunwayInfo: ''
 };
 
 // Keep track of raw values parsed from PDF
@@ -765,6 +771,452 @@ function extractWeatherSection(fullText, headerName) {
     return lines;
 }
 
+// ── NOTAM parsing ────────────────────────────────────────────────
+
+function extractRunwayInfo(text) {
+    // Capture runway dimension block: everything after "RUNWAY :" until next bullet section
+    const m = text.match(/RUNWAY\s*:\s*([^\n◼▪■]+(?:\n[^\n◼▪■]+)*)/i);
+    if (!m) return [];
+    // Split by lines and keep only lines that describe a runway pair (e.g. "16L/34R : 13123FT X 197FT")
+    const lines = m[1].split('\n');
+    const results = [];
+    for (const line of lines) {
+        const trimmed = line.trim();
+        // Must match runway designator pattern: digits + optional L/C/R, slash, digits + optional L/C/R
+        if (/\d+[LCR]?\/\d+[LCR]?\s*:/i.test(trimmed)) {
+            results.push(trimmed.replace(/\s+/g, ' '));
+        }
+    }
+    return results;
+}
+
+function extractNotamPackage1(fullText) {
+    // Locate NOTAM PACKAGE 1 block — flexible keyword match
+    const pkg1Re = /NOTAM\s+P(?:ACKAGE|KG|KGE)\.?\s*[#№]?\s*1\b[\s\S]*?(?=NOTAM\s+P(?:ACKAGE|KG|KGE)\.?\s*[#№]?\s*2\b|END\s+OF\s+(?:NOTAM\s+)?P(?:ACKAGE|KG|KGE)\.?\s*1|$)/i;
+    const pkg1Match = fullText.match(pkg1Re);
+    if (!pkg1Match) {
+        console.warn('[NOTAM] PACKAGE 1 block not found in this OFP. Snippet:', fullText.slice(0, 300));
+        return;
+    }
+    const pkg1 = pkg1Match[0];
+    console.log('[NOTAM] PACKAGE 1 found, length:', pkg1.length);
+
+    // Split into [DEP], [DEST], [ALTN] sections
+    const secRe = /\[(DEP|DEST|ALTN)\][\s\S]*?(?=\[DEP\]|\[DEST\]|\[ALTN\]|$)/gi;
+    let m;
+    let found = 0;
+    while ((m = secRe.exec(pkg1)) !== null) {
+        const tag  = m[0].match(/\[(DEP|DEST|ALTN)\]/i)[1].toUpperCase();
+        const body = m[0];
+        const entries   = parseNotamSection(body);
+        const rwInfo    = extractRunwayInfo(body);
+        console.log(`[NOTAM] [${tag}] parsed ${entries.length} entries`);
+        if (tag === 'DEP')  { flightData.depNotamEntries  = entries; flightData.depRunwayInfo  = rwInfo; }
+        if (tag === 'DEST') { flightData.arrNotamEntries  = entries; flightData.arrRunwayInfo  = rwInfo; }
+        if (tag === 'ALTN') { flightData.altnNotamEntries = entries; flightData.altnRunwayInfo = rwInfo; }
+        found++;
+    }
+    if (found === 0) {
+        console.warn('[NOTAM] PACKAGE 1 found but no [DEP]/[DEST]/[ALTN] sections inside. Snippet:', pkg1.slice(0, 400));
+    }
+}
+
+function parseNotamSection(text) {
+    const entries = [];
+    const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+    let currentCat = 'GENERAL';
+    let cur = null;
+
+    // Matches: "16APR26 08:13 - 10JUN26 15:00 RKSI A0478/26"
+    const hdrRe = /^(\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2})\s*-\s*(UFN|\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2})\s+([A-Z]{4})\s+([A-Z0-9/]+)$/i;
+
+    const save = () => { if (cur) { entries.push(cur); cur = null; } };
+
+    for (const line of lines) {
+        // Category header (◼ symbol or solid square)
+        if (/◼|▪|■/.test(line)) {
+            save();
+            currentCat = line.replace(/[◼▪■]/g, '').trim().toUpperCase();
+            continue;
+        }
+        const hm = line.match(hdrRe);
+        if (hm) {
+            save();
+            cur = { cat: currentCat, dateStart: hm[1], dateEnd: hm[2], icao: hm[3], id: hm[4], sched: '', desc: '' };
+            continue;
+        }
+        if (cur) {
+            if (line.startsWith('D)'))       cur.sched = line.replace(/^D\)\s*/, '');
+            else if (line.startsWith('E)'))  cur.desc  = line.replace(/^E\)\s*/, '');
+            else if (line.startsWith('COMMENT)')) { /* skip */ }
+            else if (cur.desc && !/^[A-Z]\)/.test(line) && !/^\d{2}[A-Z]{3}\d{2}/.test(line))
+                cur.desc += ' ' + line;
+        }
+    }
+    save();
+    // Keyword-based reclassification: override parsed category when PDF bullet parsing
+    // misses ◼ DEPARTURE / ◼ APPROACH headers (different encoding or layout)
+    for (const e of entries) {
+        const d = (e.desc || '').toUpperCase();
+        if (/^IAP\b|^ILS\s+OR\s+LOC\s+RWY|^ILS\s+RWY\s+\d|^RNAV\s*\(GPS\)\s+RWY|^VOR\s+RWY|^LOC\s+RWY|^COPTER\s+RNAV|^PAPI\b|MISSED\s+APPROACH/.test(d)) {
+            e.cat = 'APPROACH';
+        } else if (/^SID\b|^JFK\s+SID\b/.test(d)) {
+            e.cat = 'DEPARTURE';
+        }
+    }
+    return entries;
+}
+
+// ── Rule filtering ───────────────────────────────────────────────
+
+function notamPassesRules(entry, airport, flightData) {
+    const desc  = (entry.desc  || '').toUpperCase();
+    const cat   = (entry.cat   || '').toUpperCase();
+
+    // Rule 2: skip aircraft-type-specific NOTAMs
+    if (/\bA220\s+ONLY\b|320\/321\s+ONLY/.test(desc)) return false;
+    // Rule 1: skip RUNUP PAD (A380 cannot use)
+    if (/RUN.?UP\s+PAD/.test(desc)) return false;
+
+    // Rule 1.13: ALL DEPARTURE and APPROACH/IAP NOTAMs are shown — also catch by keyword
+    // in case category was set incorrectly (PDF bullet encoding issue)
+    const isApproach = cat === 'APPROACH' || /^IAP\b|^ILS\s+(OR\s+LOC\s+)?RWY|^RNAV\s*\(GPS\)\s+RWY|^VOR\s+RWY|^LOC\s+RWY/.test(desc);
+    const isDeparture = cat === 'DEPARTURE' || /^SID\b|^JFK\s+SID\b/.test(desc);
+    if (isApproach || isDeparture) return true;
+
+    // Rule 4: skip CRANE / OBST / FLAGGED globally
+    if (/\bCRANE\b|\bOBST\b|\bFLAGGED\b/.test(desc)) return false;
+
+    // Rule 1-7: skip TAXIWAY NOTAMs that are Code F wingspan restrictions
+    // (permanently restricted TWYs for Code F aircraft are pre-charted, not operationally useful)
+    if (cat.includes('TAXIWAY')) {
+        if (/\bCODE\s+F\b|\bWINGSPAN\s+MORE\s+THAN\b|\bWING\s+SPAN\s+MORE\s+THAN\b/.test(desc)) return false;
+    }
+
+    // Rule 4 (RKSI): only show NOTAMs for gates 266, 267, 268; skip all other gate/stand NOTAMs
+    if (airport === 'RKSI') {
+        const gateMatch = desc.match(/\b(?:GATE|STAND)\s+(?:NR\s+)?(\d+)\b/);
+        if (gateMatch) {
+            const gateNum = parseInt(gateMatch[1], 10);
+            if (![266, 267, 268].includes(gateNum)) return false;
+        }
+    }
+
+    // Rule 5 (KLAX): only show NOTAMs for gates 148, 150, 152, 154, 156; skip all other gate/stand NOTAMs
+    if (airport === 'KLAX') {
+        const gateMatch = desc.match(/\b(?:GATE|STAND|TXL\s+[A-Z]\d+\s+(?:NORTH|SOUTH|EAST|WEST)\s+OF\s+GATE)\s+(?:NR\s+)?(\d+[A-Z]?)\b/);
+        if (gateMatch) {
+            const gateStr = gateMatch[1].replace(/[A-Z]$/, '');
+            const gateNum = parseInt(gateStr, 10);
+            if (![148, 150, 152, 154, 156].includes(gateNum)) return false;
+        }
+    }
+
+    // Rule 7 (RJAA): only show NOTAMs for gates 45, 46
+    if (airport === 'RJAA') {
+        const gateMatch = desc.match(/\b(?:GATE|STAND)\s+(?:NR\s+)?(\d+)\b/);
+        if (gateMatch) {
+            const gateNum = parseInt(gateMatch[1], 10);
+            if (![45, 46].includes(gateNum)) return false;
+        }
+    }
+
+    // Rule 8 (RCTP): only show NOTAMs for gates C1-C6, D1-D6
+    if (airport === 'RCTP') {
+        const gateMatch = desc.match(/\b(?:GATE|STAND)\s+(?:NR\s+)?([CD]\d)\b/);
+        if (gateMatch) {
+            const gate = gateMatch[1];
+            const num = parseInt(gate.slice(1), 10);
+            if (!['C', 'D'].includes(gate[0]) || num < 1 || num > 6) return false;
+        }
+    }
+
+    // Rule 9 (VTBS): only show NOTAMs for gates S111-S118
+    if (airport === 'VTBS') {
+        const gateMatch = desc.match(/\b(?:GATE|STAND)\s+(?:NR\s+)?(S\d{3})\b/);
+        if (gateMatch) {
+            const num = parseInt(gateMatch[1].slice(1), 10);
+            if (num < 111 || num > 118) return false;
+        }
+    }
+
+    // Rule 6 (KJFK): additional content exclusions
+    if (airport === 'KJFK') {
+        // skip LGTD AND BARRICADED construction notices (Rule 6 new)
+        if (/LGTD\s+AND\s+BARRICAD/.test(desc)) return false;
+        // skip MARKINGS
+        if (/\bMARKINGS\b/.test(desc)) return false;
+        // skip TWY entries that only have LGT/SIGN issues (no closure or WIP)
+        if (cat.includes('TAXIWAY')) {
+            if (/\bLGT\b|\bSIGN\b/.test(desc) && !/\bCLSD\b|\bCLOSED\b|\bWIP\b/.test(desc)) return false;
+        }
+        // skip non-Terminal 1 ramp/apron notices
+        if (cat === 'RAMP' || cat === 'RUNWAY LIGHT') {
+            if (/TERMINAL\s+[2-9]|T[2-9]\s+RAMP/.test(desc)) return false;
+        }
+        // skip gates other than 5, 7, 8 (Terminal 1 gates)
+        const kjfkGate = desc.match(/\b(?:GATE|STAND)\s+(?:NR\s+)?(\d+[A-Z]?)\b/);
+        if (kjfkGate) {
+            const gateNum = parseInt(kjfkGate[1], 10);
+            if (![5, 7, 8].includes(gateNum)) return false;
+        }
+    }
+
+    // ALTN airport filtering: skip minor lighting sign U/S entries (not closures)
+    // These categories at ALTN airports are dominated by sign/light U/S which are low priority
+    if (cat === 'OTHER' || cat === 'TAXIWAY LIGHT') {
+        // Keep only if it involves a closure or WIP; skip pure lighting-out notices
+        if (!/\bCLSD\b|\bCLOSED\b|\bWIP\b/.test(desc)) return false;
+    }
+
+    // Rule 3: GPS RAIM outage — only show if within ETD-ETA window
+    if (cat === 'GPS' && /RAIM\s+OUTAGE/i.test(desc)) {
+        return notamRaimInWindow(entry, flightData);
+    }
+    return true;
+}
+
+function notamRaimInWindow(entry, flightData) {
+    // ETD / ETA as minutes-from-midnight on the same day scale
+    const toMin = (hhmm) => {
+        if (!hhmm) return -1;
+        const [h, m] = hhmm.replace(':', '').match(/(\d{2})(\d{2})/).slice(1).map(Number);
+        return h * 60 + m;
+    };
+    const etdMin = toMin(flightData.etd);
+    const etaMin = toMin(flightData.eta) + (flightData.eta && flightData.etd && flightData.eta < flightData.etd ? 1440 : 0);
+    if (etdMin < 0 || etaMin < 0) return true; // no ETD/ETA yet — show all
+
+    // Look for time windows in the schedule line (e.g. "1248-1251")
+    const timeRe = /(\d{4})-(\d{4})/g;
+    const src = entry.sched + ' ' + entry.desc;
+    let any = false;
+    let m;
+    while ((m = timeRe.exec(src)) !== null) {
+        any = true;
+        const start = parseInt(m[1].slice(0,2)) * 60 + parseInt(m[1].slice(2));
+        const end   = parseInt(m[2].slice(0,2)) * 60 + parseInt(m[2].slice(2));
+        if (start <= etaMin && end >= etdMin) return true;
+    }
+    return !any; // if no times found just show
+}
+
+// ── Display line builder ─────────────────────────────────────────
+
+const NOTAM_CAT_STYLE = {
+    'APPROACH':        { emoji: '🔴', type: 'hdr-red'    },
+    'DEPARTURE':       { emoji: '🔴', type: 'hdr-red'    },
+    'RUNWAY':          { emoji: '⚠️', type: 'hdr-yellow' },
+    'RUNWAY LIGHT':    { emoji: '⚠️', type: 'hdr-yellow' },
+    'TAXIWAY':         { emoji: '🚧', type: 'hdr-yellow' },
+    'TAXIWAY LIGHT':   { emoji: '🚧', type: 'hdr-yellow' },
+    'NAVAID':          { emoji: '📡', type: 'hdr-green'  },
+    'GPS':             { emoji: '🛰️', type: 'hdr-yellow' },
+    'COMPANY ADVISORY':{ emoji: '💬', type: 'hdr-green'  },
+    'RAMP':            { emoji: '🏢', type: 'hdr-green'  },
+    'AIRPORT':         { emoji: '🛬', type: 'hdr-green'  },
+    'OBSTRUCTION':     { emoji: '⛔', type: 'hdr-red'    },
+    'OTHER':           { emoji: 'ℹ️', type: 'hdr-green'  },
+};
+
+function wrapText(text, maxLen) {
+    const words = text.split(' ');
+    const out = [];
+    let cur = '';
+    for (const w of words) {
+        if ((cur + ' ' + w).trim().length > maxLen) {
+            if (cur) out.push(cur.trim());
+            cur = w;
+        } else {
+            cur = (cur + ' ' + w).trim();
+        }
+    }
+    if (cur) out.push(cur);
+    return out;
+}
+
+function summarizeNotam(desc) {
+    // Expand common NOTAM abbreviations into plain-language phrases
+    let s = desc
+        // Status
+        .replace(/\bU\/S\b/g, 'unserviceable')
+        .replace(/\bCLSD\b/g, 'closed')
+        .replace(/\bCLOSED\b/g, 'closed')
+        .replace(/\bWIP\b/g, 'work in progress')
+        .replace(/\bOPR\b/g, 'operating')
+        .replace(/\bAVBL\b/g, 'available')
+        .replace(/\bNOT AVBL\b/g, 'not available')
+        .replace(/\bACTIVE\b/g, 'active')
+        .replace(/\bEXPECT\b/g, 'expect')
+        .replace(/\bRESTD\b/g, 'restricted')
+        .replace(/\bSUSPD\b/g, 'suspended')
+        .replace(/\bLTD\b/g, 'limited')
+        // Facilities
+        .replace(/\bRWY\b/g, 'Rwy')
+        .replace(/\bTWY\b/g, 'Twy')
+        .replace(/\bAPN\b/g, 'apron')
+        .replace(/\bARP\b/g, 'airport reference point')
+        .replace(/\bATC\b/g, 'ATC')
+        .replace(/\bATIS\b/g, 'ATIS')
+        .replace(/\bILS\b/g, 'ILS')
+        .replace(/\bGP\b/g, 'glide path')
+        .replace(/\bLLZ\b/g, 'localizer')
+        .replace(/\bDME\b/g, 'DME')
+        .replace(/\bVOR\b/g, 'VOR')
+        .replace(/\bNDB\b/g, 'NDB')
+        .replace(/\bPAPI\b/g, 'PAPI')
+        .replace(/\bALS\b/g, 'approach lights')
+        .replace(/\bREIL\b/g, 'runway end ID lights')
+        .replace(/\bTDZ\b/g, 'touchdown zone')
+        .replace(/\bTHL\b/g, 'threshold lights')
+        .replace(/\bTKOF\b/g, 'takeoff')
+        .replace(/\bLDG\b/g, 'landing')
+        .replace(/\bARR\b/g, 'arrival')
+        .replace(/\bDEP\b/g, 'departure')
+        .replace(/\bACFT\b/g, 'aircraft')
+        .replace(/\bHELI\b/g, 'helicopter')
+        .replace(/\bSFC\b/g, 'surface')
+        .replace(/\bFT\b/g, 'ft')
+        .replace(/\bMTR\b/g, 'm')
+        .replace(/\bNM\b/g, 'NM')
+        .replace(/\bKT\b/g, 'kt')
+        .replace(/\bLGT\b/g, 'light')
+        .replace(/\bSIGN\b/g, 'sign')
+        .replace(/\bMKG\b/g, 'marking')
+        .replace(/\bMARKGS?\b/g, 'markings')
+        .replace(/\bSVC\b/g, 'service')
+        .replace(/\bINOP\b/g, 'inoperative')
+        .replace(/\bUFN\b/g, 'until further notice')
+        .replace(/\bEXCP\b/g, 'except')
+        .replace(/\bHR\b/g, 'hr')
+        .replace(/\bMIN\b/g, 'min')
+        .replace(/\bDAILY\b/g, 'daily')
+        .replace(/\bCONTN\b/g, 'continuous')
+        .replace(/\bNOT\s+AVBL\b/g, 'not available')
+        .replace(/\bNA\b/g, 'not authorized')
+        // CAT/approach types
+        .replace(/\bCAT\s+I{1,3}\b/g, m => m)  // keep CAT I/II/III as-is
+        .replace(/\bNPA\b/g, 'non-precision approach')
+        .replace(/\bIAP\b/g, 'instrument approach')
+        .replace(/\bSID\b/g, 'SID')
+        .replace(/\bSTAR\b/g, 'STAR')
+        // Misc
+        .replace(/\bGND\b/g, 'ground')
+        .replace(/\bTHR\b/g, 'threshold')
+        .replace(/\bCL\b/g, 'centerline')
+        .replace(/\bRCL\b/g, 'runway centerline')
+        .replace(/\bHOLD\b/g, 'hold')
+        .replace(/\bHOLDG\b/g, 'holding')
+        .replace(/\bPRKG\b/g, 'parking')
+        .replace(/\bSTND?\b/g, 'stand')
+        .replace(/\bAPCH\b/g, 'approach')
+        .replace(/\bFNL\b/g, 'final')
+        .replace(/\bINTSCN\b/g, 'intersection')
+        .replace(/\bXING\b/g, 'crossing');
+    return s;
+}
+
+function buildNotamDisplayLines(entries, airport, runwayInfo) {
+    if (!entries || entries.length === 0) return [];
+
+    // Group by category, preserving first-seen order
+    const catOrder = [];
+    const groups = {};
+    for (const e of entries) {
+        if (!notamPassesRules(e, airport, flightData)) continue;
+        const cat = e.cat || 'OTHER';
+        if (!groups[cat]) { groups[cat] = []; catOrder.push(cat); }
+        groups[cat].push(e);
+    }
+
+    // Sort categories: critical first
+    const CAT_PRIORITY = {
+        'APPROACH': 0, 'APPROACH LIGHT': 1,
+        'RUNWAY': 2, 'RUNWAY LIGHT': 3,
+        'DEPARTURE': 4,
+        'TAXIWAY': 5, 'TAXIWAY LIGHT': 6,
+        'NAVAID': 7, 'GPS': 8,
+        'RAMP': 9, 'AIRPORT': 10, 'COMPANY ADVISORY': 11,
+        'OBSTRUCTION': 12, 'OTHER': 13,
+    };
+    catOrder.sort((a, b) => (CAT_PRIORITY[a] ?? 99) - (CAT_PRIORITY[b] ?? 99));
+
+    const lines = [];
+
+    // Rule 1: runway length/width info at top, 1 runway per line
+    const rwList = Array.isArray(runwayInfo) ? runwayInfo : (runwayInfo ? [runwayInfo] : []);
+    if (rwList.length > 0) {
+        lines.push({ type: 'hdr-green', text: '📏  RWY INFO' });
+        rwList.forEach(rw => lines.push({ type: 'body', text: '  ' + rw }));
+        lines.push({ type: 'blank', text: '' });
+    }
+
+    // Rule 1a: track when we cross the DEP→APPROACH boundary for visual separator
+    let prevCatGroup = null;
+
+    for (const cat of catOrder) {
+        const style = NOTAM_CAT_STYLE[cat] || { emoji: 'ℹ️', type: 'hdr-green' };
+
+        // Rule 1a: insert visual divider between DEPARTURE and APPROACH sections
+        const curGroup  = (cat === 'DEPARTURE') ? 'DEP'
+                        : (cat === 'APPROACH' || cat === 'APPROACH LIGHT') ? 'APCH'
+                        : 'OTHER';
+        if (prevCatGroup && prevCatGroup !== curGroup && lines.length > 0) {
+            lines.push({ type: 'blank', text: '' });
+        }
+        prevCatGroup = curGroup;
+
+        lines.push({ type: style.type, text: `${style.emoji}  ${cat}` });
+
+        for (const e of groups[cat]) {
+            const hl = (cat === 'APPROACH' || cat === 'APPROACH LIGHT' || cat === 'GPS');
+            const lineType = hl ? 'body-hl' : 'body';
+
+            // Format date as DDMONYR (e.g. "29MAY26")
+            const fmtDate = (dt) => {
+                if (!dt) return '';
+                const m = dt.match(/(\d{2}[A-Z]{3}\d{2})/i);
+                return m ? m[1].toUpperCase() : dt.split(' ')[0];
+            };
+            // Build compact date badge: "(DDMONYR~DDMONYR)" or "(UFN)" or "(DDMONYR~UFN)"
+            let dateBadge = '';
+            if (e.dateStart) {
+                const ds = fmtDate(e.dateStart);
+                const de = e.dateEnd === 'UFN' ? 'UFN' : fmtDate(e.dateEnd);
+                dateBadge = de && de !== ds ? `(${ds}~${de})` : `(${ds})`;
+            }
+            // Include schedule (D) time window if present
+            if (e.sched) dateBadge += (dateBadge ? ', ' : '(') + e.sched + (dateBadge ? '' : ')');
+
+            // Build first line: "  ID (dates) — desc..."
+            const prefix = `  <u>${e.id}</u>${dateBadge ? ' ' + dateBadge : ''} — `;
+            const prefixPlainLen = `  ${e.id}${dateBadge ? ' ' + dateBadge : ''} — `.length;
+            const desc = summarizeNotam(e.desc);
+            const maxFirst = 46 - prefixPlainLen;
+            const words = desc.split(' ');
+            let firstLine = '';
+            let rest = '';
+            for (let i = 0; i < words.length; i++) {
+                const attempt = firstLine ? firstLine + ' ' + words[i] : words[i];
+                if (attempt.length <= Math.max(maxFirst, 10)) {
+                    firstLine = attempt;
+                } else {
+                    rest = words.slice(i).join(' ');
+                    break;
+                }
+            }
+            lines.push({ type: lineType, text: prefix + firstLine });
+            // Continuation lines indented to align after "— "
+            if (rest) {
+                wrapText('    ' + rest, 46).forEach(ln => lines.push({ type: lineType, text: ln }));
+            }
+
+            lines.push({ type: 'blank', text: '' });
+        }
+    }
+    return lines;
+}
+
 function recalculateWeights() {
     const zfw = num(flightData.zfw);
     const fob = num(flightData.fob);
@@ -865,6 +1317,13 @@ let melCdlData = [];
 // --- Weather Data ---
 let depArrWxScrollIndex = 0;
 let activeDepArrWxTab = 'DEP'; // 'DEP' or 'ARR'
+
+// --- NOTAM Page Data ---
+let depArrNotamScrollIndex = 0;
+let activeDepArrNotamTab = 'DEP'; // 'DEP' or 'ARR'
+
+let enrteNotamScrollIndex = 0;
+let activeEnrteNotamTab = 'ALTN'; // 'ALTN' or 'ERA'
 const depArrWxData = [
     { type: 'DEP', num: 'KLAX', desc: '102120Z 26012KT 10SM FEW020 21/14 A2992' },
     { type: 'ARR', num: 'RKSI', desc: '102200Z 23008KT 9999 FEW030 18/12 Q1013' },
@@ -1200,20 +1659,23 @@ function renderInitPage() {
         <div class="fms-bottom-layout">
             <div class="bottom-aligned-row">
                 <button class="fms-btn-grey align-target-btn btn-mel-cdl-trigger" style="border-color: #ffffff; color: #ffffff;">MEL/CDL</button>
+                <button class="fms-btn-grey align-target-btn rte-summary-aligned-btn" style="border-color: #ffffff; color: #ffffff;">RTE SUMMARY</button>
             </div>
             <div class="bottom-aligned-row">
                 <button class="fms-btn-grey align-target-btn btn-dep-arr-wx-trigger" style="border-color: #ffffff; color: #ffffff;">DEP/ARR WX</button>
-                <button class="fms-btn-grey rte-summary-aligned-btn" style="border-color: #ffffff; color: #ffffff;">RTE SUMMARY</button>
+                <button class="fms-btn-grey align-target-btn btn-dep-arr-notam-trigger" style="border-color: #ffffff; color: #ffffff; font-size: 0.65rem; white-space: nowrap;">DEP/ARR NOTAM</button>
             </div>
             <div class="bottom-aligned-row">
                 <button class="fms-btn-grey align-target-btn btn-enrte-wx-trigger" style="border-color: #ffffff; color: #ffffff;">ENRTE WX</button>
+                <button class="fms-btn-grey align-target-btn btn-enrte-notam-trigger" style="border-color: #ffffff; color: #ffffff; font-size: 0.65rem; white-space: nowrap;">ENRTE NOTAM</button>
             </div>
             <div class="bottom-aligned-row">
                 <button class="fms-btn-grey align-target-btn btn-fuel-load-trigger" style="border-color: #ffffff; color: #ffffff;">FUEL&LOAD</button>
+                <button class="fms-btn-grey align-target-btn" style="border-color: #ffffff; color: #ffffff;"></button>
             </div>
             <div class="bottom-aligned-row">
                 <button class="fms-btn-grey align-target-btn btn-step-alts-trigger" style="border-color: #ffffff; color: #ffffff;">STEP ALT</button>
-                <button class="fms-btn-grey cpny-to-aligned-btn" style="border: none; color: #ffffff;">CREW/CABIN BRIEFING</button>
+                <button class="fms-btn-grey align-target-btn btn-crew-briefing-trigger" style="border-color: #ffffff; color: #ffffff; font-size: 0.7rem;">CREW/CABIN<br>BRIEFING</button>
             </div>
         </div>
     `;
@@ -1713,6 +2175,313 @@ function renderDepArrWxPage() {
     `;
 }
 
+function renderDepArrNotamPage() {
+    resetTitleBar();
+    pageTitleText.textContent = 'ACTIVE/DEP/ARR NOTAM';
+    btnInit.classList.remove('active');
+
+    const isDepActive = activeDepArrNotamTab === 'DEP';
+
+    mainContent.innerHTML = `
+        <!-- Folder Tabs -->
+        <div class="fms-tabs" style="margin-bottom: 6px;">
+            <div class="fms-tab ${isDepActive ? 'active' : ''}" id="tab-dep-notam-active">DEP NOTAM</div>
+            <div class="fms-tab ${!isDepActive ? 'active' : ''}" id="tab-arr-notam">ARR NOTAM</div>
+        </div>
+
+        <!-- Row 1: FLT NUMBER & Page Number & Navigation -->
+        <div class="fms-row" style="margin-bottom: 2px;">
+            <div class="fms-cell" style="justify-content: space-between; align-items: center; width: 100%;">
+                <div class="cell-left" style="gap: 10px; align-items: center;">
+                    <span class="fms-label" style="width: auto; margin-right: 0;">FLT NUMBER</span>
+                    <div class="fms-val-box cyan-text" style="width: 140px; justify-content: space-between;">
+                        <span>${flightData.fltNbr || 'AAR201'}</span><span class="arrow-down">▼</span>
+                    </div>
+                </div>
+                <div class="cell-right" style="gap: 12px; align-items: center;">
+                    <span class="text-white-fms" style="font-size: 0.85rem;">1/1</span>
+                    <div style="display: flex; gap: 4px;">
+                        <button class="fms-btn-grey" style="width: 38px; height: 28px; font-size: 0.65rem; padding: 2px;">◀◀</button>
+                        <button class="fms-btn-grey" style="width: 38px; height: 28px; font-size: 0.65rem; padding: 2px;">▶▶</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Row 2: ETD/ETA & LOCAL -->
+        <div class="fms-row" style="margin-bottom: 4px;">
+            <div class="fms-cell" style="justify-content: flex-start; gap: 8px; font-size: 0.9rem;">
+                <span class="text-white-fms">${isDepActive ? 'ETD' : 'ETA'}</span>
+                <span class="text-green-fms" style="font-weight: bold; margin-right: 15px;">
+                    ${isDepActive
+                        ? (flightData.etd ? flightData.etd.replace(':', '') + 'Z' : '----Z')
+                        : (flightData.eta ? flightData.eta.replace(':', '') + 'Z' : '----Z')}
+                </span>
+                <span class="text-white-fms">LOCAL</span>
+                <span style="color: var(--text-green); font-weight: bold;">
+                    ${isDepActive
+                        ? getLocalTimeStr(flightData.etd || '00:00', getAirportOffset(flightData.from || 'RKSI'))
+                        : getLocalTimeStr(flightData.eta || '00:00', getAirportOffset(flightData.to || 'KJFK'))}
+                </span>
+            </div>
+        </div>
+
+        <!-- Table (13 rows - empty placeholder) -->
+        <table class="rte-summary-table mel-cdl-table" style="margin-bottom: 4px;">
+            <tbody id="dep-arr-notam-table-body">
+                ${getDepArrNotamTableHTML()}
+            </tbody>
+        </table>
+
+        <!-- Table Vertical Scroll Navigation -->
+        <div style="display: flex; justify-content: center; gap: 8px; margin-bottom: 4px; height: 28px;">
+            <button class="fms-btn-grey fms-btn-scroll" id="btn-dep-notam-scroll-down" style="width: 38px; height: 28px; font-size: 0.65rem; padding: 2px;">▼▼</button>
+            <button class="fms-btn-grey fms-btn-scroll" id="btn-dep-notam-scroll-up" style="width: 38px; height: 28px; font-size: 0.65rem; padding: 2px;">▲▲</button>
+        </div>
+
+        <!-- Bottom Actions Row -->
+        <div class="fms-row" style="margin-top: auto; padding-top: 5px; margin-bottom: 3px; position: relative; top: -2px; justify-content: flex-start;">
+            <button class="msg-btn btn-return" id="btn-return" style="height: 28px; width: 55px; font-size: 0.68rem; padding: 2px;">RETURN</button>
+        </div>
+    `;
+}
+
+// ── NOTAM static data ─────────────────────────────────────────────
+// type: 'hdr-red' | 'hdr-yellow' | 'hdr-green' | 'body' | 'body-hl' | 'blank'
+const depNotamLines = [
+    { type: 'hdr-yellow', text: '⚠️  GPS' },
+    { type: 'body-hl',    text: '  G2263/26: RAIM OUTAGE (NPA)' },
+    { type: 'body-hl',    text: '  29MAY 1248-1251Z, 1311-1333Z' },
+    { type: 'body-hl',    text: '  Z0511/24: GPS 간섭경보 상시유효(UFN)' },
+    { type: 'body',       text: '  → ICN/GMP 구역, GPWS 오경보 가능' },
+    { type: 'blank',      text: '' },
+    { type: 'hdr-green',  text: '🛫  RUNWAY' },
+    { type: 'body',       text: '  A0478/26: SIPA 시범운용 중' },
+    { type: 'body',       text: '  RWY 33R/34L, 15L/16R (16APR~10JUN26)' },
+    { type: 'blank',      text: '' },
+    { type: 'hdr-green',  text: '📡  NAVAID' },
+    { type: 'body',       text: '  A0407/26: VOR/DME 점검 일정 변경' },
+    { type: 'body',       text: '  NCN: 매월 5·9·15·21·27일 1500-1900Z' },
+    { type: 'body',       text: '  WNG: 매월 4·8·14·20·26일 1500-1900Z' },
+    { type: 'blank',      text: '' },
+    { type: 'hdr-green',  text: '💬  COMPANY' },
+    { type: 'body',       text: '  COAD03/26: 유사 콜사인 주의' },
+    { type: 'body',       text: '  OZ335/OZ3355, OZ601/KE601' },
+    { type: 'body',       text: '  OZ756/OZ356, OZ349/OZ339' },
+    { type: 'body',       text: '  COAD04/26: RUGMA → DCT OLMEN 권고' },
+    { type: 'body',       text: '  (Z85 경유 비권장, ICN ACC 협의 완료)' },
+];
+
+const arrNotamLines = [
+    { type: 'hdr-red',    text: '🔴  APPROACH' },
+    { type: 'body-hl',    text: '  A5219/26: KENNEDY 5 SID' },
+    { type: 'body-hl',    text: '  LGA VOR/DME U/S → NEION DEP NA' },
+    { type: 'body-hl',    text: '  (GPS 장착 항공기만 가능)' },
+    { type: 'body-hl',    text: '  A5222/26: ILS/LOC RWY 31R' },
+    { type: 'body-hl',    text: '  MA: 4000ft CAGAG HOLD (RNAV 1-GPS 필수)' },
+    { type: 'body',       text: '  A5218/26: ILS/LOC RWY 13L CAT II' },
+    { type: 'body',       text: '  DME 필수 (LGA VOR/DME 영향)' },
+    { type: 'body',       text: '  A5190/26: ILS/LOC RWY 4L' },
+    { type: 'body',       text: '  CMK VOR U/S → DME 필수' },
+    { type: 'body',       text: '  A5147/26: RWY 22L PAPI U/S' },
+    { type: 'body',       text: '  A4843/26: ILS RWY 22L IM U/S' },
+    { type: 'body',       text: '  A4842/26: ILS RWY 04R IM U/S' },
+    { type: 'blank',      text: '' },
+    { type: 'hdr-yellow', text: '⚠️  RUNWAY' },
+    { type: 'body',       text: '  A4380/26: RWY 31L TKOF HOLD LGT U/S' },
+    { type: 'body',       text: '  A3783/26: RWY 31L Lead-on LGT/KE U/S' },
+    { type: 'body',       text: '  A3773/26: RWY 13R Lead-off LGT/KE U/S' },
+    { type: 'blank',      text: '' },
+    { type: 'hdr-yellow', text: '🚧  TAXIWAY CLOSURES' },
+    { type: 'body',       text: '  TWY B (KF~M) CLSD' },
+    { type: 'body',       text: '  TWY Z (04L/22R~Y) CLSD' },
+    { type: 'body',       text: '  TWY KG (A~B) CLSD UFN' },
+    { type: 'body',       text: '  TWY L (A~B) CLSD UFN' },
+    { type: 'body',       text: '  TWY PB (Hgr12~Q) CLSD UFN' },
+    { type: 'blank',      text: '' },
+    { type: 'hdr-green',  text: '🏢  TERMINAL 1' },
+    { type: 'body',       text: '  A4509/25: T1 Ramp WIP 공사 진행 중' },
+    { type: 'body',       text: '  ARR Gate 5,7,8 → L1도어' },
+    { type: 'body',       text: '  DEP 전체 → L2도어' },
+    { type: 'blank',      text: '' },
+    { type: 'hdr-green',  text: '📡  NAVAID' },
+    { type: 'body',       text: '  A3778/26: HTO VOR U/S (~30SEP26)' },
+];
+
+const altnNotamLines = [
+    { type: 'hdr-red',    text: '🔴  APPROACH' },
+    { type: 'body-hl',    text: '  A3093/26: ILS RWY 26 U/S (~30JUN26)' },
+    { type: 'body-hl',    text: '  A2988/26: RWY 26 PAPI U/S' },
+    { type: 'body-hl',    text: '  A2278/26: ILS RWY 27R GP U/S (~31OCT26)' },
+    { type: 'body-hl',    text: '  A2078/26: RWY 09L ALS U/S (~31JUL26)' },
+    { type: 'body',       text: '  A2969/26: ILS RWY 27R CAT II NA' },
+    { type: 'body',       text: '  A2968/26: ILS RWY 09L CAT II NA' },
+    { type: 'body',       text: '  A0876/26: RWY 27L PAPI U/S' },
+    { type: 'body',       text: '  A2408/26: ILS Z RWY 9R CAT II' },
+    { type: 'body',       text: '  → Radio Alt 없으면 NA, IM U/S' },
+    { type: 'body',       text: '  A3914/25: ILS/LOC RWY 26' },
+    { type: 'body',       text: '  GPS 없으면 절차 진입 NA' },
+    { type: 'blank',      text: '' },
+    { type: 'hdr-yellow', text: '⚠️  RUNWAY' },
+    { type: 'body',       text: '  A3363/26: RWY 09R/27L CLSD' },
+    { type: 'body',       text: '  DLY 0300-1100 (27~30MAY26)' },
+    { type: 'blank',      text: '' },
+    { type: 'hdr-yellow', text: '🚧  TAXIWAY CLOSURES' },
+    { type: 'body',       text: '  TWY S5, S, W, P6, T, SS3, Z' },
+    { type: 'body',       text: '  DLY 0200-1100 (27~30MAY26)' },
+    { type: 'body',       text: '  TWY S (P6~N) CLSD ~13JUN26' },
+    { type: 'body',       text: '  TWY E/E4/E5 CLSD ~09JUN26' },
+    { type: 'body',       text: '  TWY S/S9/S10 CLSD ~17JUL26' },
+    { type: 'body',       text: '  TWY S4 CLSD ~31MAY26' },
+];
+
+function renderNotamRows(lines, scrollIndex) {
+    const ROWS = 13;
+    let html = '';
+    for (let i = 0; i < ROWS; i++) {
+        const item = lines[scrollIndex + i];
+        if (!item) {
+            html += `<tr style="height:22px;"><td style="padding:1px 4px;"></td></tr>`;
+            continue;
+        }
+        if (item.type === 'blank') {
+            html += `<tr style="height:10px;"><td></td></tr>`;
+            continue;
+        }
+        const isHdr = item.type.startsWith('hdr');
+        const color = item.type === 'hdr-red'    ? '#ff6b6b'
+                    : item.type === 'hdr-yellow'  ? '#f0c040'
+                    : item.type === 'hdr-green'   ? 'var(--text-green)'
+                    : item.type === 'body-hl'     ? '#f0c040'
+                    : '#ffffff';
+        const weight = isHdr ? 'bold' : 'normal';
+        const borderTop = isHdr ? 'border-top:1px solid #2f3542;' : '';
+        html += `
+            <tr style="height:auto;">
+                <td style="font-size:0.72rem;line-height:1.4;padding:${isHdr ? '5px' : '2px'} 4px;
+                    font-family:'Share Tech Mono',monospace;color:${color};
+                    font-weight:${weight};${borderTop}">
+                    ${item.text}
+                </td>
+            </tr>`;
+    }
+    return html;
+}
+
+function getDepArrNotamTableHTML() {
+    let lines;
+    if (activeDepArrNotamTab === 'DEP') {
+        if (flightData.depNotamEntries && flightData.depNotamEntries.length > 0) {
+            lines = buildNotamDisplayLines(flightData.depNotamEntries, flightData.from || 'RKSI', flightData.depRunwayInfo);
+        } else {
+            lines = [];
+        }
+    } else {
+        if (flightData.arrNotamEntries && flightData.arrNotamEntries.length > 0) {
+            lines = buildNotamDisplayLines(flightData.arrNotamEntries, flightData.to || 'KJFK', flightData.arrRunwayInfo);
+        } else {
+            lines = [];
+        }
+    }
+    return renderNotamRows(lines, depArrNotamScrollIndex);
+}
+
+function renderEnrteNotamPage() {
+    resetTitleBar();
+    pageTitleText.textContent = 'ACTIVE/ENRTE NOTAM';
+    btnInit.classList.remove('active');
+
+    const isAltnActive = activeEnrteNotamTab === 'ALTN';
+
+    mainContent.innerHTML = `
+        <!-- Folder Tabs -->
+        <div class="fms-tabs" style="margin-bottom: 6px;">
+            <div class="fms-tab ${isAltnActive ? 'active' : ''}" id="tab-enrte-notam-altn">ALTN NOTAM</div>
+            <div class="fms-tab ${!isAltnActive ? 'active' : ''}" id="tab-enrte-notam-era">ERA NOTAM</div>
+        </div>
+
+        <!-- Row 1: FLT NUMBER & ALTN AIRPORT -->
+        <div class="fms-row" style="margin-bottom: 2px;">
+            <div class="fms-cell" style="justify-content: space-between; align-items: center; width: 100%;">
+                <div class="cell-left" style="gap: 10px; align-items: center;">
+                    <span class="fms-label" style="width: auto; margin-right: 0;">FLT NUMBER</span>
+                    <div class="fms-val-box cyan-text" style="width: 100px; justify-content: space-between;">
+                        <span>${flightData.fltNbr || '----'}</span><span class="arrow-down">▼</span>
+                    </div>
+                </div>
+                <div class="cell-right" style="gap: 10px; align-items: center;">
+                    ${isAltnActive ? `
+                    <span class="fms-label" style="width: auto; margin-right: 0;">ALTN</span>
+                    <div class="fms-val-box cyan-text" style="width: 70px;">
+                        <span>${flightData.altn || '----'}</span>
+                    </div>
+                    ` : `
+                    <span style="color:#666; font-size:0.78rem;">ERA NOTAM</span>
+                    `}
+                    <span class="text-white-fms" style="font-size: 0.85rem;">1/1</span>
+                    <div style="display: flex; gap: 4px;">
+                        <button class="fms-btn-grey" style="width: 38px; height: 28px; font-size: 0.65rem; padding: 2px;">◀◀</button>
+                        <button class="fms-btn-grey" style="width: 38px; height: 28px; font-size: 0.65rem; padding: 2px;">▶▶</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Row 2: ALTN ETA & LOCAL -->
+        <div class="fms-row" style="margin-bottom: 4px;">
+            <div class="fms-cell" style="justify-content: flex-start; gap: 8px; font-size: 0.9rem;">
+                ${isAltnActive ? `
+                <span class="text-white-fms">ALTN</span>
+                <span class="text-green-fms" style="font-weight: bold; margin-right: 8px;">${flightData.altn || '----'}</span>
+                <span class="text-white-fms">ETA</span>
+                <span class="text-green-fms" style="font-weight: bold; margin-right: 15px;">
+                    ${flightData.eta ? flightData.eta.replace(':', '') + 'Z' : '----Z'}
+                </span>
+                <span class="text-white-fms">LOCAL</span>
+                <span style="color: var(--text-green); font-weight: bold;">
+                    ${getLocalTimeStr(flightData.eta || '00:00', getAirportOffset(flightData.altn || 'KPHL'))}
+                </span>
+                ` : `
+                <span class="text-white-fms">ERA NOTAM</span>
+                <span style="color:#666; font-size:0.78rem; margin-left:8px;">— 미구현 (PACKAGE 2 ERA)</span>
+                `}
+            </div>
+        </div>
+
+        <!-- Table (13 rows - empty placeholder) -->
+        <table class="rte-summary-table mel-cdl-table" style="margin-bottom: 4px;">
+            <tbody id="enrte-notam-table-body">
+                ${getEnrteNotamTableHTML()}
+            </tbody>
+        </table>
+
+        <!-- Table Vertical Scroll Navigation -->
+        <div style="display: flex; justify-content: center; gap: 8px; margin-bottom: 4px; height: 28px;">
+            <button class="fms-btn-grey fms-btn-scroll" id="btn-enrte-notam-scroll-down" style="width: 38px; height: 28px; font-size: 0.65rem; padding: 2px;">▼▼</button>
+            <button class="fms-btn-grey fms-btn-scroll" id="btn-enrte-notam-scroll-up" style="width: 38px; height: 28px; font-size: 0.65rem; padding: 2px;">▲▲</button>
+        </div>
+
+        <!-- Bottom Actions Row -->
+        <div class="fms-row" style="margin-top: auto; padding-top: 5px; margin-bottom: 3px; position: relative; top: -2px; justify-content: flex-start;">
+            <button class="msg-btn btn-return" id="btn-return" style="height: 28px; width: 55px; font-size: 0.68rem; padding: 2px;">RETURN</button>
+        </div>
+    `;
+}
+
+function getEnrteNotamTableHTML() {
+    let lines;
+    if (activeEnrteNotamTab === 'ALTN') {
+        if (flightData.altnNotamEntries && flightData.altnNotamEntries.length > 0) {
+            lines = buildNotamDisplayLines(flightData.altnNotamEntries, flightData.altn || 'KPHL', flightData.altnRunwayInfo);
+        } else {
+            lines = [];
+        }
+    } else {
+        lines = []; // ERA NOTAM — future use
+    }
+    return renderNotamRows(lines, enrteNotamScrollIndex);
+}
+
 function renderEnrteWxPage() {
     resetTitleBar();
     pageTitleText.textContent = 'ACTIVE/ENRTE WX';
@@ -2117,7 +2886,7 @@ document.body.addEventListener('input', (e) => {
         flightData[field] = e.target.value;
         
         // Recalculate weights if zfw, fob, taxi, trip, final, or altnTime is updated
-        if (['zfw', 'fob', 'taxi', 'trip', 'final', 'altnTime'].includes(field)) {
+        if (['zfw', 'fob', 'taxi', 'trip', 'final', 'altnFuel', 'altnTime'].includes(field)) {
             recalculateWeights();
             
             // Dynamically update read-only labels on the screen if elements exist
@@ -2171,7 +2940,11 @@ document.body.addEventListener('click', (e) => {
         resetTitleBar();
         activeMelCdlTab = 'MEL';
         activeDepArrWxTab = 'DEP';
+        activeDepArrNotamTab = 'DEP';
+        activeEnrteNotamTab = 'ALTN';
         activeEnrteWxTab = 'ALTN';
+        depArrNotamScrollIndex = 0;
+        enrteNotamScrollIndex = 0;
         renderInitPage();
     }
 
@@ -2183,6 +2956,20 @@ document.body.addEventListener('click', (e) => {
     // DEP/ARR WX trigger from INIT page
     if (e.target.closest('.btn-dep-arr-wx-trigger')) {
         renderDepArrWxPage();
+    }
+
+    // DEP/ARR NOTAM trigger from INIT page
+    if (e.target.closest('.btn-dep-arr-notam-trigger')) {
+        activeDepArrNotamTab = 'DEP';
+        depArrNotamScrollIndex = 0;
+        renderDepArrNotamPage();
+    }
+
+    // ENRTE NOTAM trigger from INIT page
+    if (e.target.closest('.btn-enrte-notam-trigger')) {
+        activeEnrteNotamTab = 'ALTN';
+        enrteNotamScrollIndex = 0;
+        renderEnrteNotamPage();
     }
 
     // ENRTE WX trigger from INIT page
@@ -2215,17 +3002,15 @@ document.body.addEventListener('click', (e) => {
     // Scroll down click for DEP WX Table
     if (e.target.closest('#btn-dep-wx-scroll-down')) {
         const maxScroll = Math.max(0, depArrWxData.length - 13);
-        if (depArrWxScrollIndex < maxScroll) {
-            depArrWxScrollIndex++;
-            const tbody = document.querySelector('.mel-cdl-table tbody');
-            if (tbody) tbody.innerHTML = getDepArrWxTableHTML();
-        }
+        depArrWxScrollIndex = Math.min(depArrWxScrollIndex + 13, maxScroll);
+        const tbody = document.querySelector('.mel-cdl-table tbody');
+        if (tbody) tbody.innerHTML = getDepArrWxTableHTML();
     }
-    
+
     // Scroll up click for DEP WX Table
     if (e.target.closest('#btn-dep-wx-scroll-up')) {
         if (depArrWxScrollIndex > 0) {
-            depArrWxScrollIndex--;
+            depArrWxScrollIndex = Math.max(0, depArrWxScrollIndex - 13);
             const tbody = document.querySelector('.mel-cdl-table tbody');
             if (tbody) tbody.innerHTML = getDepArrWxTableHTML();
         }
@@ -2235,17 +3020,15 @@ document.body.addEventListener('click', (e) => {
     if (e.target.closest('#btn-enrte-wx-scroll-down')) {
         const currentData = getProcessedEnrteWxData();
         const maxScroll = Math.max(0, currentData.length - 13);
-        if (enrteWxScrollIndex < maxScroll) {
-            enrteWxScrollIndex++;
-            const tbody = document.querySelector('.mel-cdl-table tbody');
-            if (tbody) tbody.innerHTML = getEnrteWxTableHTML();
-        }
+        enrteWxScrollIndex = Math.min(enrteWxScrollIndex + 13, maxScroll);
+        const tbody = document.querySelector('.mel-cdl-table tbody');
+        if (tbody) tbody.innerHTML = getEnrteWxTableHTML();
     }
-    
+
     // Scroll up click for ENRTE WX Table
     if (e.target.closest('#btn-enrte-wx-scroll-up')) {
         if (enrteWxScrollIndex > 0) {
-            enrteWxScrollIndex--;
+            enrteWxScrollIndex = Math.max(0, enrteWxScrollIndex - 13);
             const tbody = document.querySelector('.mel-cdl-table tbody');
             if (tbody) tbody.innerHTML = getEnrteWxTableHTML();
         }
@@ -2273,6 +3056,82 @@ document.body.addEventListener('click', (e) => {
     if (e.target.closest('#tab-dep-arr-wx-crew')) {
         activeDepArrWxTab = 'ARR';
         renderDepArrWxPage();
+    }
+
+    // Toggle DEP NOTAM tab
+    if (e.target.closest('#tab-dep-notam-active')) {
+        activeDepArrNotamTab = 'DEP';
+        depArrNotamScrollIndex = 0;
+        renderDepArrNotamPage();
+    }
+
+    // Toggle ARR NOTAM tab
+    if (e.target.closest('#tab-arr-notam')) {
+        activeDepArrNotamTab = 'ARR';
+        depArrNotamScrollIndex = 0;
+        renderDepArrNotamPage();
+    }
+
+    // Toggle ALTN NOTAM tab
+    if (e.target.closest('#tab-enrte-notam-altn')) {
+        activeEnrteNotamTab = 'ALTN';
+        enrteNotamScrollIndex = 0;
+        renderEnrteNotamPage();
+    }
+
+    // Toggle ERA NOTAM tab
+    if (e.target.closest('#tab-enrte-notam-era')) {
+        activeEnrteNotamTab = 'ERA';
+        enrteNotamScrollIndex = 0;
+        renderEnrteNotamPage();
+    }
+
+    // Scroll DEP/ARR NOTAM table — reuse getDepArrNotamTableHTML for line count
+    if (e.target.closest('#btn-dep-notam-scroll-down')) {
+        const allLines = getDepArrNotamTableHTML.__lines || [];
+        // Build lines the same way getDepArrNotamTableHTML does to get the count
+        const pdfLoaded = !!lastImportedPdfData;
+        let countLines;
+        if (activeDepArrNotamTab === 'DEP') {
+            countLines = flightData.depNotamEntries?.length
+                ? buildNotamDisplayLines(flightData.depNotamEntries, flightData.from || 'RKSI', flightData.depRunwayInfo)
+                : [];
+        } else {
+            countLines = flightData.arrNotamEntries?.length
+                ? buildNotamDisplayLines(flightData.arrNotamEntries, flightData.to || 'KJFK', flightData.arrRunwayInfo)
+                : [];
+        }
+        const max = Math.max(0, countLines.length - 13);
+        depArrNotamScrollIndex = Math.min(depArrNotamScrollIndex + 13, max);
+        const tbody = document.querySelector('#dep-arr-notam-table-body');
+        if (tbody) tbody.innerHTML = getDepArrNotamTableHTML();
+    }
+    if (e.target.closest('#btn-dep-notam-scroll-up')) {
+        if (depArrNotamScrollIndex > 0) {
+            depArrNotamScrollIndex = Math.max(0, depArrNotamScrollIndex - 13);
+            const tbody = document.querySelector('#dep-arr-notam-table-body');
+            if (tbody) tbody.innerHTML = getDepArrNotamTableHTML();
+        }
+    }
+
+    // Scroll ENRTE NOTAM table
+    if (e.target.closest('#btn-enrte-notam-scroll-down')) {
+        const countLines = activeEnrteNotamTab === 'ALTN'
+            ? (flightData.altnNotamEntries?.length
+                ? buildNotamDisplayLines(flightData.altnNotamEntries, flightData.altn || 'KPHL', flightData.altnRunwayInfo)
+                : [])
+            : [];
+        const max = Math.max(0, countLines.length - 13);
+        enrteNotamScrollIndex = Math.min(enrteNotamScrollIndex + 13, max);
+        const tbody = document.querySelector('#enrte-notam-table-body');
+        if (tbody) tbody.innerHTML = getEnrteNotamTableHTML();
+    }
+    if (e.target.closest('#btn-enrte-notam-scroll-up')) {
+        if (enrteNotamScrollIndex > 0) {
+            enrteNotamScrollIndex = Math.max(0, enrteNotamScrollIndex - 13);
+            const tbody = document.querySelector('#enrte-notam-table-body');
+            if (tbody) tbody.innerHTML = getEnrteNotamTableHTML();
+        }
     }
 
     // Toggle ENRTE WX tab (ALTN WX)
@@ -2340,6 +3199,29 @@ document.body.addEventListener('click', (e) => {
     }
 
 });
+
+// --- Hold-to-scroll: press and hold any scroll button to keep paging ---
+let _scrollHoldTimer = null;
+let _scrollHoldInterval = null;
+
+function _clearScrollHold() {
+    clearTimeout(_scrollHoldTimer);
+    clearInterval(_scrollHoldInterval);
+    _scrollHoldTimer = null;
+    _scrollHoldInterval = null;
+}
+
+document.addEventListener('pointerdown', (e) => {
+    const btn = e.target.closest('.fms-btn-scroll');
+    if (!btn) return;
+    _scrollHoldTimer = setTimeout(() => {
+        _scrollHoldInterval = setInterval(() => btn.click(), 200);
+    }, 500);
+});
+
+document.addEventListener('pointerup', _clearScrollHold);
+document.addEventListener('pointercancel', _clearScrollHold);
+document.addEventListener('pointerleave', _clearScrollHold);
 
 // --- Initial Render ---
 renderInitPage();
@@ -2680,6 +3562,12 @@ if (fileInputEl) {
         flightData.arrWeatherRaw = extractWeatherSection(fullText, 'ARRIVAL WEATHER');
         flightData.altnWeatherRaw = extractWeatherSection(fullText, 'ALTERNATE WEATHER');
         flightData.enrteWeatherRaw = extractWeatherSection(fullText, 'ENROUTE WEATHER');
+
+        // NOTAM PACKAGE 1 parsing
+        flightData.depNotamEntries  = [];
+        flightData.arrNotamEntries  = [];
+        flightData.altnNotamEntries = [];
+        extractNotamPackage1(fullText);
         if (flightData.depWeatherRaw.length > 0 || flightData.arrWeatherRaw.length > 0) {
             matchedCount++;
         }
