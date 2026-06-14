@@ -1324,6 +1324,8 @@ let activeDepArrNotamTab = 'DEP'; // 'DEP' or 'ARR'
 
 let enrteNotamScrollIndex = 0;
 let activeEnrteNotamTab = 'ALTN'; // 'ALTN' or 'ERA'
+let activeEraFirNotamTab = 'ERA'; // 'ERA' or 'FIR'
+let eraFirNotamScrollIndex = 0;
 const depArrWxData = [
     { type: 'DEP', num: 'KLAX', desc: '102120Z 26012KT 10SM FEW020 21/14 A2992' },
     { type: 'ARR', num: 'RKSI', desc: '102200Z 23008KT 9999 FEW030 18/12 Q1013' },
@@ -1663,15 +1665,15 @@ function renderInitPage() {
             </div>
             <div class="bottom-aligned-row">
                 <button class="fms-btn-grey align-target-btn btn-dep-arr-wx-trigger" style="border-color: #ffffff; color: #ffffff;">DEP/ARR WX</button>
-                <button class="fms-btn-grey align-target-btn btn-dep-arr-notam-trigger" style="border-color: #ffffff; color: #ffffff; font-size: 0.65rem; white-space: nowrap;">DEP/ARR NOTAM</button>
+                <button class="fms-btn-grey align-target-btn btn-dep-arr-notam-trigger" style="border-color: #ffffff; color: #ffffff;">DEP/ARR NOTAM</button>
             </div>
             <div class="bottom-aligned-row">
                 <button class="fms-btn-grey align-target-btn btn-enrte-wx-trigger" style="border-color: #ffffff; color: #ffffff;">ENRTE WX</button>
-                <button class="fms-btn-grey align-target-btn btn-enrte-notam-trigger" style="border-color: #ffffff; color: #ffffff; font-size: 0.65rem; white-space: nowrap;">ENRTE NOTAM</button>
+                <button class="fms-btn-grey align-target-btn btn-enrte-notam-trigger" style="border-color: #ffffff; color: #ffffff;">ALTN NOTAM</button>
             </div>
             <div class="bottom-aligned-row">
                 <button class="fms-btn-grey align-target-btn btn-fuel-load-trigger" style="border-color: #ffffff; color: #ffffff;">FUEL&LOAD</button>
-                <button class="fms-btn-grey align-target-btn" style="border-color: #ffffff; color: #ffffff;"></button>
+                <button class="fms-btn-grey align-target-btn btn-era-fir-notam-trigger" style="border-color: #ffffff; color: #ffffff;">ERA/FIR NOTAM</button>
             </div>
             <div class="bottom-aligned-row">
                 <button class="fms-btn-grey align-target-btn btn-step-alts-trigger" style="border-color: #ffffff; color: #ffffff;">STEP ALT</button>
@@ -2397,7 +2399,7 @@ function renderEnrteNotamPage() {
         <!-- Folder Tabs -->
         <div class="fms-tabs" style="margin-bottom: 6px;">
             <div class="fms-tab ${isAltnActive ? 'active' : ''}" id="tab-enrte-notam-altn">ALTN NOTAM</div>
-            <div class="fms-tab ${!isAltnActive ? 'active' : ''}" id="tab-enrte-notam-era">ERA NOTAM</div>
+            <div class="fms-tab ${!isAltnActive ? 'active' : ''}" id="tab-enrte-notam-era">EDTO NOTAM</div>
         </div>
 
         <!-- Row 1: FLT NUMBER & ALTN AIRPORT -->
@@ -2416,7 +2418,7 @@ function renderEnrteNotamPage() {
                         <span>${flightData.altn || '----'}</span>
                     </div>
                     ` : `
-                    <span style="color:#666; font-size:0.78rem;">ERA NOTAM</span>
+                    <span style="color:#666; font-size:0.78rem;">EDTO NOTAM</span>
                     `}
                     <span class="text-white-fms" style="font-size: 0.85rem;">1/1</span>
                     <div style="display: flex; gap: 4px;">
@@ -2442,7 +2444,7 @@ function renderEnrteNotamPage() {
                     ${getLocalTimeStr(flightData.eta || '00:00', getAirportOffset(flightData.altn || 'KPHL'))}
                 </span>
                 ` : `
-                <span class="text-white-fms">ERA NOTAM</span>
+                <span class="text-white-fms">EDTO NOTAM</span>
                 <span style="color:#666; font-size:0.78rem; margin-left:8px;">— 미구현 (PACKAGE 2 ERA)</span>
                 `}
             </div>
@@ -2477,9 +2479,76 @@ function getEnrteNotamTableHTML() {
             lines = [];
         }
     } else {
-        lines = []; // ERA NOTAM — future use
+        lines = []; // EDTO NOTAM — future use
     }
     return renderNotamRows(lines, enrteNotamScrollIndex);
+}
+
+function getEraFirNotamTableHTML() {
+    // ERA and FIR NOTAM — future: parse from NOTAM PACKAGE 2 [ERA] / PACKAGE 3 [FIR]
+    return renderNotamRows([], eraFirNotamScrollIndex);
+}
+
+function renderEraFirNotamPage() {
+    resetTitleBar();
+    pageTitleText.textContent = 'ACTIVE/ERA·FIR NOTAM';
+    btnInit.classList.remove('active');
+
+    const isEraActive = activeEraFirNotamTab === 'ERA';
+
+    mainContent.innerHTML = `
+        <!-- Folder Tabs -->
+        <div class="fms-tabs" style="margin-bottom: 6px;">
+            <div class="fms-tab ${isEraActive ? 'active' : ''}" id="tab-era-fir-notam-era">ERA NOTAM</div>
+            <div class="fms-tab ${!isEraActive ? 'active' : ''}" id="tab-era-fir-notam-fir">FIR NOTAM</div>
+        </div>
+
+        <!-- Row 1: FLT NUMBER & active tab label -->
+        <div class="fms-row" style="margin-bottom: 2px;">
+            <div class="fms-cell" style="justify-content: space-between; align-items: center; width: 100%;">
+                <div class="cell-left" style="gap: 10px; align-items: center;">
+                    <span class="fms-label" style="width: auto; margin-right: 0;">FLT NUMBER</span>
+                    <div class="fms-val-box cyan-text" style="width: 100px; justify-content: space-between;">
+                        <span>${flightData.fltNbr || '----'}</span><span class="arrow-down">▼</span>
+                    </div>
+                </div>
+                <div class="cell-right" style="gap: 10px; align-items: center;">
+                    <span style="color:#666; font-size:0.78rem;">${isEraActive ? 'ERA NOTAM' : 'FIR NOTAM'}</span>
+                    <span class="text-white-fms" style="font-size: 0.85rem;">1/1</span>
+                    <div style="display: flex; gap: 4px;">
+                        <button class="fms-btn-grey" style="width: 38px; height: 28px; font-size: 0.65rem; padding: 2px;">◀◀</button>
+                        <button class="fms-btn-grey" style="width: 38px; height: 28px; font-size: 0.65rem; padding: 2px;">▶▶</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Row 2: tab subtitle -->
+        <div class="fms-row" style="margin-bottom: 4px;">
+            <div class="fms-cell" style="justify-content: flex-start; gap: 8px; font-size: 0.9rem;">
+                <span class="text-white-fms">${isEraActive ? 'ERA NOTAM' : 'FIR NOTAM'}</span>
+                <span style="color:#666; font-size:0.78rem; margin-left:8px;">— 미구현 (PACKAGE ${isEraActive ? '2 ERA' : '3 FIR'})</span>
+            </div>
+        </div>
+
+        <!-- Table (13 rows) -->
+        <table class="rte-summary-table mel-cdl-table" style="margin-bottom: 4px;">
+            <tbody id="era-fir-notam-table-body">
+                ${getEraFirNotamTableHTML()}
+            </tbody>
+        </table>
+
+        <!-- Scroll Buttons -->
+        <div style="display: flex; justify-content: center; gap: 8px; margin-bottom: 4px; height: 28px;">
+            <button class="fms-btn-grey fms-btn-scroll" id="btn-era-fir-notam-scroll-down" style="width: 38px; height: 28px; font-size: 0.65rem; padding: 2px;">▼▼</button>
+            <button class="fms-btn-grey fms-btn-scroll" id="btn-era-fir-notam-scroll-up" style="width: 38px; height: 28px; font-size: 0.65rem; padding: 2px;">▲▲</button>
+        </div>
+
+        <!-- Bottom Actions -->
+        <div class="fms-row" style="margin-top: auto; padding-top: 5px; margin-bottom: 3px; position: relative; top: -2px; justify-content: flex-start;">
+            <button class="msg-btn btn-return" id="btn-return" style="height: 28px; width: 55px; font-size: 0.68rem; padding: 2px;">RETURN</button>
+        </div>
+    `;
 }
 
 function renderEnrteWxPage() {
@@ -2972,6 +3041,13 @@ document.body.addEventListener('click', (e) => {
         renderEnrteNotamPage();
     }
 
+    // ERA/FIR NOTAM trigger from INIT page
+    if (e.target.closest('.btn-era-fir-notam-trigger')) {
+        activeEraFirNotamTab = 'ERA';
+        eraFirNotamScrollIndex = 0;
+        renderEraFirNotamPage();
+    }
+
     // ENRTE WX trigger from INIT page
     if (e.target.closest('.btn-enrte-wx-trigger')) {
         renderEnrteWxPage();
@@ -3079,11 +3155,40 @@ document.body.addEventListener('click', (e) => {
         renderEnrteNotamPage();
     }
 
-    // Toggle ERA NOTAM tab
+    // Toggle EDTO NOTAM tab
     if (e.target.closest('#tab-enrte-notam-era')) {
         activeEnrteNotamTab = 'ERA';
         enrteNotamScrollIndex = 0;
         renderEnrteNotamPage();
+    }
+
+    // Toggle ERA NOTAM tab (ERA/FIR NOTAM page)
+    if (e.target.closest('#tab-era-fir-notam-era')) {
+        activeEraFirNotamTab = 'ERA';
+        eraFirNotamScrollIndex = 0;
+        renderEraFirNotamPage();
+    }
+
+    // Toggle FIR NOTAM tab (ERA/FIR NOTAM page)
+    if (e.target.closest('#tab-era-fir-notam-fir')) {
+        activeEraFirNotamTab = 'FIR';
+        eraFirNotamScrollIndex = 0;
+        renderEraFirNotamPage();
+    }
+
+    // Scroll ERA/FIR NOTAM table
+    if (e.target.closest('#btn-era-fir-notam-scroll-down')) {
+        const max = Math.max(0, 0 - 13); // no data yet
+        eraFirNotamScrollIndex = Math.min(eraFirNotamScrollIndex + 13, max);
+        const tbody = document.querySelector('#era-fir-notam-table-body');
+        if (tbody) tbody.innerHTML = getEraFirNotamTableHTML();
+    }
+    if (e.target.closest('#btn-era-fir-notam-scroll-up')) {
+        if (eraFirNotamScrollIndex > 0) {
+            eraFirNotamScrollIndex = Math.max(0, eraFirNotamScrollIndex - 13);
+            const tbody = document.querySelector('#era-fir-notam-table-body');
+            if (tbody) tbody.innerHTML = getEraFirNotamTableHTML();
+        }
     }
 
     // Scroll DEP/ARR NOTAM table — reuse getDepArrNotamTableHTML for line count
