@@ -1103,7 +1103,39 @@ function buildNotamDisplayLines(entries, airport, runwayInfo) {
         groups[cat].push(e);
     }
 
+    // Move COMPANY ADVISORY to the front of catOrder (display at top)
+    const caIdx = catOrder.indexOf('COMPANY ADVISORY');
+    if (caIdx > 0) {
+        catOrder.splice(caIdx, 1);
+        catOrder.unshift('COMPANY ADVISORY');
+    }
+
     const lines = [];
+
+    // COMPANY ADVISORY at the very top (before RWY INFO)
+    if (groups['COMPANY ADVISORY']) {
+        const style = NOTAM_CAT_STYLE['COMPANY ADVISORY'];
+        lines.push({ type: style.type, text: `${style.emoji}  COMPANY ADVISORY` });
+        for (const e of groups['COMPANY ADVISORY']) {
+            const fmtDate = (dt) => {
+                if (!dt) return '';
+                const m = dt.match(/(\d{2}[A-Z]{3}\d{2})/i);
+                return m ? m[1].toUpperCase() : dt.split(' ')[0];
+            };
+            const badgeParts = [];
+            if (e.dateStart) {
+                const ds = fmtDate(e.dateStart);
+                const de = e.dateEnd === 'UFN' ? 'UFN' : fmtDate(e.dateEnd);
+                badgeParts.push(de && de !== ds ? `${ds}~${de}` : ds);
+            }
+            if (e.sched) badgeParts.push(e.sched);
+            const dateBadge = badgeParts.length ? `(${badgeParts.join(', ')})` : '';
+            const desc = summarizeNotam(e.desc);
+            lines.push({ type: 'body', text: `  <u>${e.id}</u>${dateBadge ? ' ' + dateBadge : ''}` });
+            wrapText('    ' + desc, 74).forEach(ln => lines.push({ type: 'body', text: ln }));
+            lines.push({ type: 'blank', text: '' });
+        }
+    }
 
     // Rule 1: runway length/width info at top, 1 runway per line
     const rwList = Array.isArray(runwayInfo) ? runwayInfo : (runwayInfo ? [runwayInfo] : []);
@@ -1114,6 +1146,7 @@ function buildNotamDisplayLines(entries, airport, runwayInfo) {
     }
 
     for (const cat of catOrder) {
+        if (cat === 'COMPANY ADVISORY') continue; // already rendered at top
         const style = NOTAM_CAT_STYLE[cat] || { emoji: 'ℹ️', type: 'hdr-green' };
         lines.push({ type: style.type, text: `${style.emoji}  ${cat}` });
 
