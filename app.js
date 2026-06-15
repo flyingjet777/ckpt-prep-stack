@@ -854,14 +854,36 @@ function parseNotamSection(text) {
         }
     }
     save();
-    // Keyword-based reclassification: override parsed category when PDF bullet parsing
-    // misses ◼ DEPARTURE / ◼ APPROACH headers (different encoding or layout)
+    // Keyword-based reclassification: correct category when ◼ bullet is missed or
+    // encoded differently by PDF.js. Runs on ALL entries as a safety net.
+    const KNOWN_CATS = new Set([
+        'APPROACH','APPROACH LIGHT','RUNWAY','RUNWAY LIGHT','DEPARTURE',
+        'TAXIWAY','TAXIWAY LIGHT','NAVAID','GPS','RAMP','AIRPORT',
+        'COMPANY ADVISORY','OBSTRUCTION','OTHER'
+    ]);
     for (const e of entries) {
         const d = (e.desc || '').toUpperCase();
-        if (/^IAP\b|^ILS\s+OR\s+LOC\s+RWY|^ILS\s+RWY\s+\d|^RNAV\s*\(GPS\)\s+RWY|^VOR\s+RWY|^LOC\s+RWY|^COPTER\s+RNAV|^PAPI\b|MISSED\s+APPROACH/.test(d)) {
+        const catOk = KNOWN_CATS.has(e.cat);
+
+        // Always reclassify APPROACH/DEPARTURE regardless of current cat (encoding issues)
+        if (/^IAP\b|^ILS\s+(?:OR\s+LOC\s+)?RWY|^RNAV\s*\((?:GPS|RNP)\)\s+[A-Z]\s+RWY|^VOR\s+RWY|^LOC\s+RWY|^PAPI\b|MISSED\s+APPROACH/.test(d)) {
             e.cat = 'APPROACH';
-        } else if (/^SID\b|^JFK\s+SID\b/.test(d)) {
+        } else if (/^(?:[A-Z]{3,4}\s+)?(?:NAV\s+)?ILS\s+RWY\s+\d/.test(d)) {
+            e.cat = 'APPROACH';
+        } else if (/^(?:[A-Z]{3,4}\s+)?(?:NAV\s+)?(?:ILS\s+OR\s+LOC\s+RWY|RNAV\s*\([GR](?:PS|NP)\))/.test(d)) {
+            e.cat = 'APPROACH';
+        } else if (/^SID\b|^[A-Z]{3,4}\s+SID\b|^ODP\b|^[A-Z]{3,4}\s+ODP\b/.test(d)) {
             e.cat = 'DEPARTURE';
+        } else if (!catOk) {
+            // Fallback for entries with unrecognised category (bullet not parsed)
+            if (/\bALS\b|APCH\s+LGT|APPROACH\s+LIGHT/.test(d))          e.cat = 'APPROACH LIGHT';
+            else if (/\bRWY\s+\d|RUNWAY\s+\d|DECLARED\s+DIST|TORA\b|TODA\b|ASDA\b|LDA\b/.test(d)) e.cat = 'RUNWAY';
+            else if (/\bTWY\s+[A-Z]|\bTAXIWAY\b/.test(d))               e.cat = 'TAXIWAY';
+            else if (/\bAPRON\b|\bRAMP\b|\bSTAND\s+NR\b|\bGATE\s+\d/.test(d)) e.cat = 'RAMP';
+            else if (/\bVOR\b|\bNDB\b|\bTACAN\b|\bDME\b|\bILS\b|\bLLZ\b/.test(d)) e.cat = 'NAVAID';
+            else if (/\bGPS\b|\bRAIM\b|\bGNSS\b/.test(d))               e.cat = 'GPS';
+            else if (/\bCRANE\b|\bOBST\b/.test(d))                      e.cat = 'OBSTRUCTION';
+            else                                                           e.cat = 'OTHER';
         }
     }
     return entries;
@@ -895,7 +917,7 @@ function notamPassesRules(entry, airport, flightData) {
 
     // Rule 4 (RKSI): only show NOTAMs for gates 266, 267, 268; skip all other gate/stand NOTAMs
     if (airport === 'RKSI') {
-        const gateMatch = desc.match(/\b(?:GATE|STAND)\s+(?:NR\s+)?(\d+)\b/);
+        const gateMatch = desc.match(/\b(?:GATE|STAND|SPOT|BAY|REMOTE)\s+(?:NR\s+)?(\d+)\b/);
         if (gateMatch) {
             const gateNum = parseInt(gateMatch[1], 10);
             if (![266, 267, 268].includes(gateNum)) return false;
@@ -904,7 +926,7 @@ function notamPassesRules(entry, airport, flightData) {
 
     // Rule 5 (KLAX): only show NOTAMs for gates 148, 150, 152, 154, 156; skip all other gate/stand NOTAMs
     if (airport === 'KLAX') {
-        const gateMatch = desc.match(/\b(?:GATE|STAND|TXL\s+[A-Z]\d+\s+(?:NORTH|SOUTH|EAST|WEST)\s+OF\s+GATE)\s+(?:NR\s+)?(\d+[A-Z]?)\b/);
+        const gateMatch = desc.match(/\b(?:GATE|STAND|SPOT|BAY|REMOTE|TXL\s+[A-Z]\d+\s+(?:NORTH|SOUTH|EAST|WEST)\s+OF\s+GATE)\s+(?:NR\s+)?(\d+[A-Z]?)\b/);
         if (gateMatch) {
             const gateStr = gateMatch[1].replace(/[A-Z]$/, '');
             const gateNum = parseInt(gateStr, 10);
@@ -914,7 +936,7 @@ function notamPassesRules(entry, airport, flightData) {
 
     // Rule 7 (RJAA): only show NOTAMs for gates 45, 46
     if (airport === 'RJAA') {
-        const gateMatch = desc.match(/\b(?:GATE|STAND)\s+(?:NR\s+)?(\d+)\b/);
+        const gateMatch = desc.match(/\b(?:GATE|STAND|SPOT|BAY|REMOTE)\s+(?:NR\s+)?(\d+)\b/);
         if (gateMatch) {
             const gateNum = parseInt(gateMatch[1], 10);
             if (![45, 46].includes(gateNum)) return false;
@@ -923,7 +945,7 @@ function notamPassesRules(entry, airport, flightData) {
 
     // Rule 8 (RCTP): only show NOTAMs for gates C1-C6, D1-D6
     if (airport === 'RCTP') {
-        const gateMatch = desc.match(/\b(?:GATE|STAND)\s+(?:NR\s+)?([CD]\d)\b/);
+        const gateMatch = desc.match(/\b(?:GATE|STAND|SPOT|BAY|REMOTE)\s+(?:NR\s+)?([CD]\d)\b/);
         if (gateMatch) {
             const gate = gateMatch[1];
             const num = parseInt(gate.slice(1), 10);
@@ -933,7 +955,7 @@ function notamPassesRules(entry, airport, flightData) {
 
     // Rule 9 (VTBS): only show NOTAMs for gates S111-S118
     if (airport === 'VTBS') {
-        const gateMatch = desc.match(/\b(?:GATE|STAND)\s+(?:NR\s+)?(S\d{3})\b/);
+        const gateMatch = desc.match(/\b(?:GATE|STAND|SPOT|BAY|REMOTE)\s+(?:NR\s+)?(S\d{3})\b/);
         if (gateMatch) {
             const num = parseInt(gateMatch[1].slice(1), 10);
             if (num < 111 || num > 118) return false;
@@ -1036,90 +1058,13 @@ function wrapText(text, maxLen) {
 }
 
 function summarizeNotam(desc) {
-    // Expand common NOTAM abbreviations into plain-language phrases
-    let s = desc
-        // Status
-        .replace(/\bU\/S\b/g, 'unserviceable')
-        .replace(/\bCLSD\b/g, 'closed')
-        .replace(/\bCLOSED\b/g, 'closed')
-        .replace(/\bWIP\b/g, 'work in progress')
-        .replace(/\bOPR\b/g, 'operating')
-        .replace(/\bAVBL\b/g, 'available')
-        .replace(/\bNOT AVBL\b/g, 'not available')
-        .replace(/\bACTIVE\b/g, 'active')
-        .replace(/\bEXPECT\b/g, 'expect')
-        .replace(/\bRESTD\b/g, 'restricted')
-        .replace(/\bSUSPD\b/g, 'suspended')
-        .replace(/\bLTD\b/g, 'limited')
-        // Facilities
-        .replace(/\bRWY\b/g, 'Rwy')
-        .replace(/\bTWY\b/g, 'Twy')
-        .replace(/\bAPN\b/g, 'apron')
-        .replace(/\bARP\b/g, 'airport reference point')
-        .replace(/\bATC\b/g, 'ATC')
-        .replace(/\bATIS\b/g, 'ATIS')
-        .replace(/\bILS\b/g, 'ILS')
-        .replace(/\bGP\b/g, 'glide path')
-        .replace(/\bLLZ\b/g, 'localizer')
-        .replace(/\bDME\b/g, 'DME')
-        .replace(/\bVOR\b/g, 'VOR')
-        .replace(/\bNDB\b/g, 'NDB')
-        .replace(/\bPAPI\b/g, 'PAPI')
-        .replace(/\bALS\b/g, 'approach lights')
-        .replace(/\bREIL\b/g, 'runway end ID lights')
-        .replace(/\bTDZ\b/g, 'touchdown zone')
-        .replace(/\bTHL\b/g, 'threshold lights')
-        .replace(/\bTKOF\b/g, 'takeoff')
-        .replace(/\bLDG\b/g, 'landing')
-        .replace(/\bARR\b/g, 'arrival')
-        .replace(/\bDEP\b/g, 'departure')
-        .replace(/\bACFT\b/g, 'aircraft')
-        .replace(/\bHELI\b/g, 'helicopter')
-        .replace(/\bSFC\b/g, 'surface')
-        .replace(/\bFT\b/g, 'ft')
-        .replace(/\bMTR\b/g, 'm')
-        .replace(/\bNM\b/g, 'NM')
-        .replace(/\bKT\b/g, 'kt')
-        .replace(/\bLGT\b/g, 'light')
-        .replace(/\bSIGN\b/g, 'sign')
-        .replace(/\bMKG\b/g, 'marking')
-        .replace(/\bMARKGS?\b/g, 'markings')
-        .replace(/\bSVC\b/g, 'service')
-        .replace(/\bINOP\b/g, 'inoperative')
-        .replace(/\bUFN\b/g, 'until further notice')
-        .replace(/\bEXCP\b/g, 'except')
-        .replace(/\bHR\b/g, 'hr')
-        .replace(/\bMIN\b/g, 'min')
-        .replace(/\bDAILY\b/g, 'daily')
-        .replace(/\bCONTN\b/g, 'continuous')
-        .replace(/\bNOT\s+AVBL\b/g, 'not available')
-        .replace(/\bNA\b/g, 'not authorized')
-        // CAT/approach types
-        .replace(/\bCAT\s+I{1,3}\b/g, m => m)  // keep CAT I/II/III as-is
-        .replace(/\bNPA\b/g, 'non-precision approach')
-        .replace(/\bIAP\b/g, 'instrument approach')
-        .replace(/\bSID\b/g, 'SID')
-        .replace(/\bSTAR\b/g, 'STAR')
-        // Misc
-        .replace(/\bGND\b/g, 'ground')
-        .replace(/\bTHR\b/g, 'threshold')
-        .replace(/\bCL\b/g, 'centerline')
-        .replace(/\bRCL\b/g, 'runway centerline')
-        .replace(/\bHOLD\b/g, 'hold')
-        .replace(/\bHOLDG\b/g, 'holding')
-        .replace(/\bPRKG\b/g, 'parking')
-        .replace(/\bSTND?\b/g, 'stand')
-        .replace(/\bAPCH\b/g, 'approach')
-        .replace(/\bFNL\b/g, 'final')
-        .replace(/\bINTSCN\b/g, 'intersection')
-        .replace(/\bXING\b/g, 'crossing');
-    return s;
+    return desc.toUpperCase();
 }
 
 function buildNotamDisplayLines(entries, airport, runwayInfo) {
     if (!entries || entries.length === 0) return [];
 
-    // Group by category, preserving first-seen order
+    // Group by category, preserving PDF bullet order (no sorting)
     const catOrder = [];
     const groups = {};
     for (const e of entries) {
@@ -1128,18 +1073,6 @@ function buildNotamDisplayLines(entries, airport, runwayInfo) {
         if (!groups[cat]) { groups[cat] = []; catOrder.push(cat); }
         groups[cat].push(e);
     }
-
-    // Sort categories: critical first
-    const CAT_PRIORITY = {
-        'APPROACH': 0, 'APPROACH LIGHT': 1,
-        'RUNWAY': 2, 'RUNWAY LIGHT': 3,
-        'DEPARTURE': 4,
-        'TAXIWAY': 5, 'TAXIWAY LIGHT': 6,
-        'NAVAID': 7, 'GPS': 8,
-        'RAMP': 9, 'AIRPORT': 10, 'COMPANY ADVISORY': 11,
-        'OBSTRUCTION': 12, 'OTHER': 13,
-    };
-    catOrder.sort((a, b) => (CAT_PRIORITY[a] ?? 99) - (CAT_PRIORITY[b] ?? 99));
 
     const lines = [];
 
@@ -1151,21 +1084,8 @@ function buildNotamDisplayLines(entries, airport, runwayInfo) {
         lines.push({ type: 'blank', text: '' });
     }
 
-    // Rule 1a: track when we cross the DEP→APPROACH boundary for visual separator
-    let prevCatGroup = null;
-
     for (const cat of catOrder) {
         const style = NOTAM_CAT_STYLE[cat] || { emoji: 'ℹ️', type: 'hdr-green' };
-
-        // Rule 1a: insert visual divider between DEPARTURE and APPROACH sections
-        const curGroup  = (cat === 'DEPARTURE') ? 'DEP'
-                        : (cat === 'APPROACH' || cat === 'APPROACH LIGHT') ? 'APCH'
-                        : 'OTHER';
-        if (prevCatGroup && prevCatGroup !== curGroup && lines.length > 0) {
-            lines.push({ type: 'blank', text: '' });
-        }
-        prevCatGroup = curGroup;
-
         lines.push({ type: style.type, text: `${style.emoji}  ${cat}` });
 
         for (const e of groups[cat]) {
@@ -1188,28 +1108,11 @@ function buildNotamDisplayLines(entries, airport, runwayInfo) {
             // Include schedule (D) time window if present
             if (e.sched) dateBadge += (dateBadge ? ', ' : '(') + e.sched + (dateBadge ? '' : ')');
 
-            // Build first line: "  ID (dates) — desc..."
-            const prefix = `  <u>${e.id}</u>${dateBadge ? ' ' + dateBadge : ''} — `;
-            const prefixPlainLen = `  ${e.id}${dateBadge ? ' ' + dateBadge : ''} — `.length;
+            // Line 1: ID + date badge
+            // Line 2+: description (full uppercase, wrapped)
             const desc = summarizeNotam(e.desc);
-            const maxFirst = 46 - prefixPlainLen;
-            const words = desc.split(' ');
-            let firstLine = '';
-            let rest = '';
-            for (let i = 0; i < words.length; i++) {
-                const attempt = firstLine ? firstLine + ' ' + words[i] : words[i];
-                if (attempt.length <= Math.max(maxFirst, 10)) {
-                    firstLine = attempt;
-                } else {
-                    rest = words.slice(i).join(' ');
-                    break;
-                }
-            }
-            lines.push({ type: lineType, text: prefix + firstLine });
-            // Continuation lines indented to align after "— "
-            if (rest) {
-                wrapText('    ' + rest, 46).forEach(ln => lines.push({ type: lineType, text: ln }));
-            }
+            lines.push({ type: lineType, text: `  <u>${e.id}</u>${dateBadge ? ' ' + dateBadge : ''}` });
+            wrapText('    ' + desc, 74).forEach(ln => lines.push({ type: lineType, text: ln }));
 
             lines.push({ type: 'blank', text: '' });
         }
@@ -3517,13 +3420,34 @@ if (fileInputEl) {
             if (flMatch) { flightData.crzFl = 'FL ' + flMatch[1]; matchedCount++; }
         }
 
-        // 6. AVG WIND/TEMP — "M031/M49" (M = minus/headwind, P = plus/tailwind)
+        // 6. AVG WIND/TEMP header — "P089/M55" → TRIP WIND only
         const windTempMatch = fullText.match(/\b([MP]\d{3})\s*\/\s*([MP]\d{1,2})\b/);
         if (windTempMatch) {
             flightData.tripWind = windTempMatch[1].toUpperCase();
-            const t = windTempMatch[2].toUpperCase();
-            flightData.crzTemp = (t.startsWith('M') ? '-' : '+') + t.substring(1) + ' °C';
             matchedCount++;
+        }
+
+        // 6b. CRZ TEMP — OAT at the waypoint where altitude first transitions CLB → CRZ FL
+        //     Route line format: "DDDD  NXX[ ]XX.X  TTT  ALT  WDR/WSP  FUEL  OAT ..."
+        //     ALT column is either "CLB" or a 3-digit FL number (e.g. 390).
+        //     OAT at cruise altitude is always negative — shown as magnitude only in OFP.
+        const crzFlNum = (flightData.crzFl || '').replace(/\D/g, '');
+        if (crzFlNum) {
+            // Flexible regex: lat may or may not have space between degrees and decimal
+            const routeRe = /^\s*\d{4,5}\s+[NS][\d.\s]+\s+\d{2,3}\s+(CLB|\d{3})\s+\S+\/\d+\s+(\d{3,5})\s+(\d{2,3})/gm;
+            let rm;
+            let prevAlt = 'CLB';
+            while ((rm = routeRe.exec(fullText)) !== null) {
+                const alt = rm[1];
+                const oat = parseInt(rm[3], 10);
+                // Target: first line where ALT == CRZ FL (transition from CLB)
+                if (alt === crzFlNum) {
+                    flightData.crzTemp = '-' + oat + ' °C';
+                    matchedCount++;
+                    break;
+                }
+                prevAlt = alt;
+            }
         }
 
         // 7. APMS — "APMS/P 02.3 PCNT" -> "+2.3 %"  (M = minus)
