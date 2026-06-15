@@ -48,6 +48,7 @@
 |---|------|-----------|
 | 3-1 | GPS RAIM OUTAGE는 ETD~ETA 시간대와 겹치는 경우에만 표시 | `notamRaimInWindow(entry, flightData)` |
 | 3-2 | GPS SIGNAL UNRELIABLE / INTERFERENCE는 시간 무관하게 항상 표시 | `cat === 'GPS'` 이고 RAIM이 아닌 경우 pass |
+| 3-3 | RAIM 다중 시간창(D 스케줄)은 날짜 배지에 넣지 않고 일자별로 줄을 나눠 표시 (`06  1116-1119  1215-1217`) | `buildNotamDisplayLines()` — `isRaimSched` 분기 |
 
 ---
 

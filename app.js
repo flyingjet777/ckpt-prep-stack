@@ -977,7 +977,8 @@ function notamPassesRules(entry, airport, flightData) {
             if (/TERMINAL\s+[2-9]|T[2-9]\s+RAMP/.test(desc)) return false;
         }
         // skip gates other than 5, 7, 8 (Terminal 1 gates)
-        const kjfkGate = desc.match(/\b(?:GATE|STAND)\s+(?:NR\s+)?(\d+[A-Z]?)\b/);
+        // §2: GATE/STAND/SPOT/BAY/REMOTE are all treated as the same concept
+        const kjfkGate = desc.match(/\b(?:GATE|STAND|SPOT|BAY|REMOTE)\s+(?:NR\s+)?(\d+[A-Z]?)\b/);
         if (kjfkGate) {
             const gateNum = parseInt(kjfkGate[1], 10);
             if (![5, 7, 8].includes(gateNum)) return false;
@@ -1099,20 +1100,35 @@ function buildNotamDisplayLines(entries, airport, runwayInfo) {
                 return m ? m[1].toUpperCase() : dt.split(' ')[0];
             };
             // Build compact date badge: "(DDMONYR~DDMONYR)" or "(UFN)" or "(DDMONYR~UFN)"
-            let dateBadge = '';
+            // Schedule (D) time window, if present, goes inside the same parentheses.
+            const badgeParts = [];
             if (e.dateStart) {
                 const ds = fmtDate(e.dateStart);
                 const de = e.dateEnd === 'UFN' ? 'UFN' : fmtDate(e.dateEnd);
-                dateBadge = de && de !== ds ? `(${ds}~${de})` : `(${ds})`;
+                badgeParts.push(de && de !== ds ? `${ds}~${de}` : ds);
             }
-            // Include schedule (D) time window if present
-            if (e.sched) dateBadge += (dateBadge ? ', ' : '(') + e.sched + (dateBadge ? '' : ')');
+            // GPS RAIM schedules list per-day time windows
+            // ("06  1116-1119  1215-1217, 07  1112-1115 ..."). These are too long for
+            // the date badge — render each day on its own line below the description.
+            const isRaimSched = cat === 'GPS' && e.sched && /\d{4}-\d{4}/.test(e.sched);
+            if (e.sched && !isRaimSched) badgeParts.push(e.sched);
+            const dateBadge = badgeParts.length ? `(${badgeParts.join(', ')})` : '';
 
             // Line 1: ID + date badge
             // Line 2+: description (full uppercase, wrapped)
             const desc = summarizeNotam(e.desc);
             lines.push({ type: lineType, text: `  <u>${e.id}</u>${dateBadge ? ' ' + dateBadge : ''}` });
             wrapText('    ' + desc, 74).forEach(ln => lines.push({ type: lineType, text: ln }));
+
+            // RAIM per-day time windows, one day per line
+            if (isRaimSched) {
+                e.sched.split(',').map(s => s.trim()).filter(Boolean).forEach(grp => {
+                    const dm = grp.match(/^(\d{1,2})\s+(.*)$/);
+                    const txt = dm ? `${dm[1].padStart(2, '0')}  ${dm[2].replace(/\s+/g, '  ')}`
+                                   : grp.replace(/\s+/g, '  ');
+                    lines.push({ type: lineType, text: '      ' + txt });
+                });
+            }
 
             lines.push({ type: 'blank', text: '' });
         }
