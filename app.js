@@ -943,6 +943,8 @@ function notamPassesRules(entry, airport, flightData) {
     // (permanently restricted TWYs for Code F aircraft are pre-charted, not operationally useful)
     if (cat.includes('TAXIWAY')) {
         if (/\bCODE\s+F\b|\bWINGSPAN\s+MORE\s+THAN\b|\bWING\s+SPAN\s+MORE\s+THAN\b/.test(desc)) return false;
+        // Rule 1-14: skip TWY lighting / sign / marking / barricade / dimmed notices (all airports)
+        if (/\bLGT\b|\bLIGHT(?:ING|S)?\b|\bSIGN\b|\bMARKING[S]?\b|\bBARRICAD(?:ED|ING)?\b|\bDIMMED\b/.test(desc)) return false;
     }
 
     // Rule 4 (RKSI): only show NOTAMs for gates 266, 267, 268; skip all other gate/stand NOTAMs
@@ -998,10 +1000,6 @@ function notamPassesRules(entry, airport, flightData) {
         if (/LGTD\s+AND\s+BARRICAD/.test(desc)) return false;
         // skip MARKINGS
         if (/\bMARKINGS\b/.test(desc)) return false;
-        // skip TWY entries that only have LGT/SIGN issues (no closure or WIP)
-        if (cat.includes('TAXIWAY')) {
-            if (/\bLGT\b|\bSIGN\b/.test(desc) && !/\bCLSD\b|\bCLOSED\b|\bWIP\b/.test(desc)) return false;
-        }
         // skip non-Terminal 1 ramp/apron notices
         if (cat === 'RAMP' || cat === 'RUNWAY LIGHT') {
             if (/TERMINAL\s+[2-9]|T[2-9]\s+RAMP/.test(desc)) return false;

@@ -16,6 +16,7 @@
 | 1-5 | NOTAM 표시 형식: 1행에 NOTAM 번호(밑줄) + 날짜범위, 2행~에 내용 | `buildNotamDisplayLines()` |
 | 1-6 | 각 NOTAM 항목 사이에 1줄 여백 | `lines.push({ type: 'blank' })` |
 | 1-7 | TAXIWAY: CODE F 날개폭 제한 항목 제외 (`CODE F` / `WINGSPAN MORE THAN` / `WING SPAN MORE THAN`) | `notamPassesRules()` — 구현됨 |
+| 1-14 | TAXIWAY: `LGT`, `LIGHT`, `SIGN`, `MARKING`, `BARRICADED`, `DIMMED` 포함 항목 전역 제외 | `notamPassesRules()` — 구현됨 |
 | 1-8 | RUNUP PAD 관련 NOTAM 제외 (A380 사용 불가) | `notamPassesRules()` |
 | 1-9 | 모든 공항의 DEP(출발) 및 IAP(계기접근) 관련 NOTAM은 반드시 표시 | `isApproach \|\| isDeparture → return true` |
 | 1-10 | DEP 관련 항목과 APPROACH 관련 항목을 시각적으로 분리 (빈 줄) | `buildNotamDisplayLines()` 카테고리 그룹 구분선 |
