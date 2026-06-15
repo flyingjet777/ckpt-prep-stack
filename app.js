@@ -828,8 +828,10 @@ function parseNotamSection(text) {
     let currentCat = 'GENERAL';
     let cur = null;
 
-    // Matches: "16APR26 08:13 - 10JUN26 15:00 RKSI A0478/26"
+    // Standard NOTAM header: "16APR26 08:13 - 10JUN26 15:00 RKSI A0478/26"
     const hdrRe = /^(\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2})\s*-\s*(UFN|\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2})\s+([A-Z]{4})\s+([A-Z0-9/]+)$/i;
+    // COMPANY ADVISORY header: "1. 26JUN24 15:00 - UFN    RJCC COAD01/24"
+    const coAdHdrRe = /^\d+\.\s+(\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2})\s*-\s*(UFN|\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2})\s+([A-Z]{4})\s+([A-Z0-9/]+)/i;
 
     const save = () => { if (cur) { entries.push(cur); cur = null; } };
 
@@ -840,7 +842,11 @@ function parseNotamSection(text) {
             currentCat = line.replace(/[◼▪■]/g, '').trim().toUpperCase();
             continue;
         }
-        const hm = line.match(hdrRe);
+        // Try standard header first
+        let hm = line.match(hdrRe);
+        if (!hm && currentCat === 'COMPANY ADVISORY') {
+            hm = line.match(coAdHdrRe);
+        }
         if (hm) {
             save();
             cur = { cat: currentCat, dateStart: hm[1], dateEnd: hm[2], icao: hm[3], id: hm[4], sched: '', desc: '' };
@@ -850,7 +856,14 @@ function parseNotamSection(text) {
             if (line.startsWith('D)'))       cur.sched = line.replace(/^D\)\s*/, '');
             else if (line.startsWith('E)'))  cur.desc  = line.replace(/^E\)\s*/, '');
             else if (line.startsWith('COMMENT)')) { /* skip */ }
-            else if (cur.desc && !/^[A-Z]\)/.test(line) && !/^\d{2}[A-Z]{3}\d{2}/.test(line))
+            // COMPANY ADVISORY content lines start with "- " or "** "
+            else if (currentCat === 'COMPANY ADVISORY' && /^-{1,2}\s|^\*\*/.test(line)) {
+                const content = line.replace(/^-{1,2}\s*/, '').replace(/^\*\*\s*/, '').replace(/\s*\*\*$/, '');
+                if (content && !content.startsWith('BY ') && !/^BY\s+\w+--/.test(content)) {
+                    cur.desc += (cur.desc ? ' / ' : '') + content;
+                }
+            }
+            else if (cur.desc && !/^[A-Z]\)/.test(line) && !/^\d{2}[A-Z]{3}\d{2}/.test(line) && !/^\d+\.\s+\d{2}[A-Z]{3}/.test(line))
                 cur.desc += ' ' + line;
         }
     }
@@ -929,6 +942,9 @@ function notamPassesRules(entry, airport, flightData) {
     if (/\bA220\s+ONLY\b|320\/321\s+ONLY/.test(desc)) return false;
     // Rule 1: skip RUNUP PAD (A380 cannot use)
     if (/RUN.?UP\s+PAD/.test(desc)) return false;
+
+    // COMPANY ADVISORY: always show (operator-issued operational notices)
+    if (cat === 'COMPANY ADVISORY') return true;
 
     // Rule 1.13: ALL DEPARTURE and APPROACH/IAP NOTAMs are shown — also catch by keyword
     // in case category was set incorrectly (PDF bullet encoding issue)
