@@ -2530,13 +2530,34 @@ if (fileInputEl) {
             if (flMatch) { flightData.crzFl = 'FL ' + flMatch[1]; matchedCount++; }
         }
 
-        // 6. AVG WIND/TEMP — "M031/M49" (M = minus/headwind, P = plus/tailwind)
+        // 6. AVG WIND/TEMP header — "P089/M55" → TRIP WIND only
         const windTempMatch = fullText.match(/\b([MP]\d{3})\s*\/\s*([MP]\d{1,2})\b/);
         if (windTempMatch) {
             flightData.tripWind = windTempMatch[1].toUpperCase();
-            const t = windTempMatch[2].toUpperCase();
-            flightData.crzTemp = (t.startsWith('M') ? '-' : '+') + t.substring(1) + ' °C';
             matchedCount++;
+        }
+
+        // 6b. CRZ TEMP — OAT at the waypoint where altitude first transitions CLB → CRZ FL
+        //     Route line format: "DDDD  NXX[ ]XX.X  TTT  ALT  WDR/WSP  FUEL  OAT ..."
+        //     ALT column is either "CLB" or a 3-digit FL number (e.g. 390).
+        //     OAT at cruise altitude is always negative — shown as magnitude only in OFP.
+        const crzFlNum = (flightData.crzFl || '').replace(/\D/g, '');
+        if (crzFlNum) {
+            // Flexible regex: lat may or may not have space between degrees and decimal
+            const routeRe = /^\s*\d{4,5}\s+[NS][\d.\s]+\s+\d{2,3}\s+(CLB|\d{3})\s+\S+\/\d+\s+(\d{3,5})\s+(\d{2,3})/gm;
+            let rm;
+            let prevAlt = 'CLB';
+            while ((rm = routeRe.exec(fullText)) !== null) {
+                const alt = rm[1];
+                const oat = parseInt(rm[3], 10);
+                // Target: first line where ALT == CRZ FL (transition from CLB)
+                if (alt === crzFlNum) {
+                    flightData.crzTemp = '-' + oat + ' °C';
+                    matchedCount++;
+                    break;
+                }
+                prevAlt = alt;
+            }
         }
 
         // 7. APMS — "APMS/P 02.3 PCNT" -> "+2.3 %"  (M = minus)
