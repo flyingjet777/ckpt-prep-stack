@@ -103,5 +103,18 @@ NOTAM Package 1 PDF에 나타나는 `◼` bullet 순서를 그대로 따른다.
 - [x] VTBS 게이트 필터 (S111-S118) — GATE/STAND/SPOT/BAY/REMOTE 모두 적용
 - [x] KJFK 게이트 필터 (5, 7, 8) + 추가 필터
 - [x] `summarizeNotam()` — 전체 대문자 유지 (`desc.toUpperCase()`)
-- [ ] ERA NOTAM 탭 — NOTAM PACKAGE 2 파싱 연결
+- [x] EDTO NOTAM 탭 — NOTAM PACKAGE 2 [ETP] 섹션 파싱 연결 (`extractNotamPackage2()`)
 - [ ] FIR NOTAM 탭 — NOTAM PACKAGE 3 파싱 연결
+
+---
+
+## 7. EDTO NOTAM (PACKAGE 2 ETP 섹션)
+
+| # | 규칙 | 구현 위치 |
+|---|------|-----------|
+| 7-1 | NOTAM PACKAGE 2 전체 블록을 먼저 추출 | `extractNotamPackage2()` |
+| 7-2 | `[ETP] ICAO / IATA / 공항 전체 이름` 형식의 제목줄로 섹션을 분리 | `etpRe = /(\[ETP\][^\n]*)\n([\s\S]*?)(?=\[ETP\]|$)/gi` |
+| 7-3 | OFP 상단 "ETP :" 열에 나열된 공항과 동일한 공항이 `[ETP]` 섹션으로 등장 | 동일 정규식으로 처리됨 |
+| 7-4 | 각 ETP 공항 제목을 **✈️  [ETP] ICAO / IATA / 공항명** 형태로 큰 글씨(cyan, bold)로 표시 | `buildEtpNotamDisplayLines()` — `type: 'etp-title'` |
+| 7-5 | 제목 이하 NOTAM은 기존 `buildNotamDisplayLines()` 규칙(필터링 포함)을 그대로 적용 | `buildEtpNotamDisplayLines()` 내부에서 호출 |
+| 7-6 | EDTO NOTAM 탭 헤더에 ETP 공항 코드 목록을 표시 (예: RJCC / PANC / PACD) | `renderEnrteNotamPage()` |

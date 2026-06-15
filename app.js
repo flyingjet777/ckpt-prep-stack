@@ -48,6 +48,7 @@ const flightData = {
     depNotamEntries: [],
     arrNotamEntries: [],
     altnNotamEntries: [],
+    etpNotamSections: [],   // Array of { title, entries } from NOTAM PACKAGE 2 [ETP] sections
     depRunwayInfo: '',
     arrRunwayInfo: '',
     altnRunwayInfo: ''
@@ -889,6 +890,35 @@ function parseNotamSection(text) {
     return entries;
 }
 
+function extractNotamPackage2(fullText) {
+    // Locate NOTAM PACKAGE 2 block
+    const pkg2Re = /NOTAM\s+P(?:ACKAGE|KG|KGE)\.?\s*[#№]?\s*2\b[\s\S]*?(?=NOTAM\s+P(?:ACKAGE|KG|KGE)\.?\s*[#№]?\s*3\b|END\s+OF\s+(?:NOTAM\s+)?P(?:ACKAGE|KG|KGE)\.?\s*2|$)/i;
+    const pkg2Match = fullText.match(pkg2Re);
+    if (!pkg2Match) {
+        console.warn('[NOTAM] PACKAGE 2 block not found.');
+        return;
+    }
+    const pkg2 = pkg2Match[0];
+    console.log('[NOTAM] PACKAGE 2 found, length:', pkg2.length);
+
+    // Split by [ETP] section headers.
+    // Header examples:
+    //   [ETP] RJCC / CTS / Sapporo New Chitose Airport
+    //   [ETP] PANC / ANC / Ted Stevens Anchorage International Airport
+    // Also handle "ETP :" table lines at the top of the package (informational — not parsed as NOTAM sections).
+    const etpRe = /(\[ETP\][^\n]*)\n([\s\S]*?)(?=\[ETP\]|$)/gi;
+    flightData.etpNotamSections = [];
+    let m;
+    while ((m = etpRe.exec(pkg2)) !== null) {
+        const title = m[1].trim();
+        const body = m[2];
+        const entries = parseNotamSection(body);
+        console.log(`[NOTAM] ETP section "${title}" parsed ${entries.length} entries`);
+        flightData.etpNotamSections.push({ title, entries });
+    }
+    console.log(`[NOTAM] PACKAGE 2: total ${flightData.etpNotamSections.length} ETP sections`);
+}
+
 // ── Rule filtering ───────────────────────────────────────────────
 
 function notamPassesRules(entry, airport, flightData) {
@@ -1132,6 +1162,29 @@ function buildNotamDisplayLines(entries, airport, runwayInfo) {
 
             lines.push({ type: 'blank', text: '' });
         }
+    }
+    return lines;
+}
+
+function buildEtpNotamDisplayLines() {
+    const sections = flightData.etpNotamSections;
+    if (!sections || sections.length === 0) return [];
+
+    const lines = [];
+    for (const section of sections) {
+        // Big title line: ✈️  [ETP] RJCC / CTS / Sapporo New Chitose Airport
+        lines.push({ type: 'etp-title', text: `✈️  ${section.title}` });
+        lines.push({ type: 'blank', text: '' });
+
+        // NOTAM entries for this ETP airport — reuse existing NOTAM display builder.
+        // Extract ICAO from title: "[ETP] RJCC / CTS / ..." → "RJCC"
+        const icaoMatch = section.title.match(/\[ETP\]\s*([A-Z]{4})\b/i);
+        const airport = icaoMatch ? icaoMatch[1].toUpperCase() : '';
+        const notamLines = buildNotamDisplayLines(section.entries, airport, []);
+        lines.push(...notamLines);
+
+        // Blank separator between airports
+        lines.push({ type: 'blank', text: '' });
     }
     return lines;
 }
@@ -2256,6 +2309,21 @@ const altnNotamLines = [
     { type: 'body',       text: '  TWY S4 CLSD ~31MAY26' },
 ];
 
+function highlightNotamKeywords(text) {
+    // Wrap specific aviation keywords in yellow <span>
+    // Order matters: longer/more specific patterns first
+    return text
+        // Runway designators: RWY 33L, RWY 04R, RWY 16C, RWY 9/27 etc.
+        .replace(/\b(RWY\s+\d{1,2}[LCR]?(?:\/\d{1,2}[LCR]?)?)\b/g,
+            '<span style="color:#f0c040;font-weight:bold;">$1</span>')
+        // Taxiway names: TWY A, TWY B3, TWY KG etc.
+        .replace(/\b(TWY\s+[A-Z]{1,3}\d*)\b/g,
+            '<span style="color:#f0c040;font-weight:bold;">$1</span>')
+        // Approach / navaid types
+        .replace(/\b(ILS(?:\s+OR\s+LOC)?|RNAV|VOR(?:\/DME)?|LOC(?:\/DME)?|NDB(?:\/DME)?|TACAN|LLZ(?:\/DME)?|PAPI|VASI|ALS|SID|IAP|ODP|GNSS|RAIM|GPS|DME|GLS|LPV|LNAV(?:\/VNAV)?)\b/g,
+            '<span style="color:#f0c040;font-weight:bold;">$1</span>');
+}
+
 function renderNotamRows(lines, scrollIndex) {
     const ROWS = 13;
     let html = '';
@@ -2269,20 +2337,35 @@ function renderNotamRows(lines, scrollIndex) {
             html += `<tr style="height:10px;"><td></td></tr>`;
             continue;
         }
+        // ETP airport title — large, prominent, cyan header
+        if (item.type === 'etp-title') {
+            html += `
+                <tr style="height:auto;">
+                    <td style="font-size:0.82rem;line-height:1.5;padding:8px 4px 4px 4px;
+                        font-family:'Share Tech Mono',monospace;
+                        color:var(--text-cyan);font-weight:bold;
+                        border-top:2px solid var(--text-cyan);letter-spacing:0.01em;">
+                        ${item.text}
+                    </td>
+                </tr>`;
+            continue;
+        }
         const isHdr = item.type.startsWith('hdr');
         const color = item.type === 'hdr-red'    ? '#ff6b6b'
                     : item.type === 'hdr-yellow'  ? '#f0c040'
                     : item.type === 'hdr-green'   ? 'var(--text-green)'
-                    : item.type === 'body-hl'     ? '#f0c040'
+                    : item.type === 'body-hl'     ? '#ffffff'
                     : '#ffffff';
         const weight = isHdr ? 'bold' : 'normal';
         const borderTop = isHdr ? 'border-top:1px solid #2f3542;' : '';
+        // Apply keyword highlighting only to body lines (not headers)
+        const displayText = isHdr ? item.text : highlightNotamKeywords(item.text);
         html += `
             <tr style="height:auto;">
                 <td style="font-size:0.72rem;line-height:1.4;padding:${isHdr ? '5px' : '2px'} 4px;
                     font-family:'Share Tech Mono',monospace;color:${color};
                     font-weight:${weight};${borderTop}">
-                    ${item.text}
+                    ${displayText}
                 </td>
             </tr>`;
     }
@@ -2337,7 +2420,9 @@ function renderEnrteNotamPage() {
                         <span>${flightData.altn || '----'}</span>
                     </div>
                     ` : `
-                    <span style="color:#666; font-size:0.78rem;">EDTO NOTAM</span>
+                    <span style="color:var(--text-cyan); font-size:0.78rem; font-weight:bold;">
+                        EDTO / ETP ${flightData.etpNotamSections && flightData.etpNotamSections.length > 0 ? '(' + flightData.etpNotamSections.length + ' airports)' : ''}
+                    </span>
                     `}
                     <span class="text-white-fms" style="font-size: 0.85rem;">1/1</span>
                     <div style="display: flex; gap: 4px;">
@@ -2364,7 +2449,14 @@ function renderEnrteNotamPage() {
                 </span>
                 ` : `
                 <span class="text-white-fms">EDTO NOTAM</span>
-                <span style="color:#666; font-size:0.78rem; margin-left:8px;">— 미구현 (PACKAGE 2 ERA)</span>
+                <span style="color:var(--text-cyan); font-size:0.78rem; margin-left:8px;">
+                    ${flightData.etpNotamSections && flightData.etpNotamSections.length > 0
+                        ? '— ETP ' + flightData.etpNotamSections.map(s => {
+                            const m = s.title.match(/\[ETP\]\s*([A-Z]{4})\b/i);
+                            return m ? m[1] : '';
+                          }).filter(Boolean).join(' / ')
+                        : '— PDF에서 PACKAGE 2 가져오기'}
+                </span>
                 `}
             </div>
         </div>
@@ -2398,7 +2490,8 @@ function getEnrteNotamTableHTML() {
             lines = [];
         }
     } else {
-        lines = []; // EDTO NOTAM — future use
+        // EDTO NOTAM — ETP sections from NOTAM PACKAGE 2
+        lines = buildEtpNotamDisplayLines();
     }
     return renderNotamRows(lines, enrteNotamScrollIndex);
 }
@@ -3608,11 +3701,13 @@ if (fileInputEl) {
         flightData.altnWeatherRaw = extractWeatherSection(fullText, 'ALTERNATE WEATHER');
         flightData.enrteWeatherRaw = extractWeatherSection(fullText, 'ENROUTE WEATHER');
 
-        // NOTAM PACKAGE 1 parsing
+        // NOTAM PACKAGE 1 & 2 parsing
         flightData.depNotamEntries  = [];
         flightData.arrNotamEntries  = [];
         flightData.altnNotamEntries = [];
+        flightData.etpNotamSections = [];
         extractNotamPackage1(fullText);
+        extractNotamPackage2(fullText);
         if (flightData.depWeatherRaw.length > 0 || flightData.arrWeatherRaw.length > 0) {
             matchedCount++;
         }
