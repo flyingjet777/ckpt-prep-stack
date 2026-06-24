@@ -49,9 +49,18 @@ const flightData = {
     arrNotamEntries: [],
     altnNotamEntries: [],
     etpNotamSections: [],   // Array of { title, entries } from NOTAM PACKAGE 2 [ETP] sections
+    firNotamSections: [],   // Array of { fir, rawText } from NOTAM PACKAGE 3 [FIR] sections
+    firAiSummary: '',       // Claude AI 요약 결과 (한국어)
+    firAiStatus: 'idle',    // 'idle' | 'loading' | 'done' | 'error'
     depRunwayInfo: '',
     arrRunwayInfo: '',
-    altnRunwayInfo: ''
+    altnRunwayInfo: '',
+    depGate: '',           // 출발 게이트 (AeroDataBox)
+    depTerminal: '',       // 출발 터미널
+    gateStatus: 'idle',   // 'idle' | 'loading' | 'done' | 'error'
+    depMetar: null,        // { raw, flight_category, observed } — aviationweather.gov
+    arrMetar: null,
+    metarCacheTime: 0      // Date.now() at last fetch — 15분 캐싱
 };
 
 // Keep track of raw values parsed from PDF
@@ -932,6 +941,473 @@ function extractNotamPackage2(fullText) {
     console.log(`[NOTAM] PACKAGE 2: total ${flightData.etpNotamSections.length} ETP sections`);
 }
 
+function extractNotamPackage3(fullText) {
+    // PACKAGE 3 블록 추출: "NOTAM PACKAGE 3" ~ "END OF NOTAM PACKAGE 3" 또는 EOF
+    const pkg3Re = /NOTAM\s+P(?:ACKAGE|KG|KGE)\.?\s*[#№]?\s*3\b[\s\S]*?(?=END\s+OF\s+(?:NOTAM\s+)?P(?:ACKAGE|KG|KGE)\.?\s*3|$)/i;
+    const pkg3Match = fullText.match(pkg3Re);
+    if (!pkg3Match) {
+        console.warn('[NOTAM] PACKAGE 3 block not found.');
+        flightData.firNotamSections = [];
+        return;
+    }
+    const pkg3 = pkg3Match[0];
+    console.log('[NOTAM] PACKAGE 3 found, length:', pkg3.length);
+
+    // FIR 코드 목록을 헤더에서 추출: "FIR: RKRR RJJJ KZAK KZOA KZLA"
+    const firListMatch = pkg3.match(/FIR\s*:\s*([A-Z]{4}(?:\s+[A-Z]{4})*)/i);
+    const firListStr = firListMatch ? firListMatch[1] : '';
+    const expectedFirs = firListStr ? firListStr.trim().split(/\s+/) : [];
+    console.log('[NOTAM] Expected FIRs:', expectedFirs);
+
+    // [FIR] ICAO / 공항명 형식의 섹션으로 분리
+    // 예: "[FIR] RKRR/ Incheon, KR" 또는 "[FIR] RJJJ/ Fukuoka, JP"
+    const firSecRe = /(\[FIR\]\s*[A-Z]{4}[^\n]*)\n([\s\S]*?)(?=\[FIR\]\s*[A-Z]{4}|$)/gi;
+    flightData.firNotamSections = [];
+    let m;
+    while ((m = firSecRe.exec(pkg3)) !== null) {
+        const header = m[1].trim();
+        const body   = m[2];
+
+        // FIR ICAO 코드 추출: "[FIR] RKRR/ Incheon" → "RKRR"
+        const icaoMatch = header.match(/\[FIR\]\s*([A-Z]{4})/i);
+        const fir = icaoMatch ? icaoMatch[1].toUpperCase() : 'UNKN';
+
+        // 원문 텍스트 보존 (AI 요약용)
+        const rawText = body.trim();
+
+        flightData.firNotamSections.push({ fir, header, rawText });
+        console.log(`[NOTAM] FIR section "${fir}" length: ${rawText.length}`);
+    }
+    console.log(`[NOTAM] PACKAGE 3: total ${flightData.firNotamSections.length} FIR sections`);
+
+    // 파싱 완료 후 AI 요약 호출
+    if (flightData.firNotamSections.length > 0) {
+        callFirNotamAiSummary();
+    }
+}
+
+// ── FIR NOTAM AI 요약 (Claude API) ─────────────────────────────────
+
+async function callFirNotamAiSummary() {
+    flightData.firAiStatus = 'loading';
+    flightData.firAiSummary = '';
+
+    // FIR NOTAM 탭이 열려 있으면 로딩 상태 즉시 반영
+    if (activeEraFirNotamTab === 'FIR') {
+        const tbody = document.querySelector('#era-fir-notam-table-body');
+        if (tbody) tbody.innerHTML = getFirNotamTableHTML();
+    }
+
+    // API 키 가져오기 (localStorage 저장)
+    const apiKey = getOrAskApiKey();
+    if (!apiKey) {
+        flightData.firAiStatus = 'error';
+        flightData.firAiSummary = 'API KEY 없음 — 설정 버튼을 눌러 Anthropic API 키를 입력하세요.';
+        if (activeEraFirNotamTab === 'FIR') {
+            const tbody = document.querySelector('#era-fir-notam-table-body');
+            if (tbody) tbody.innerHTML = getFirNotamTableHTML();
+        }
+        return;
+    }
+
+    // PACKAGE 3 전체 원문 합산 (FIR별 구분선 포함)
+    const pkg3Text = flightData.firNotamSections
+        .map(s => `=== FIR: ${s.fir} ===\n${s.rawText}`)
+        .join('\n\n');
+
+    const firList = flightData.firNotamSections.map(s => s.fir).join(', ');
+    const fltInfo = `편명: ${flightData.fltNbr || '-'}, 출발: ${flightData.from || '-'}, 도착: ${flightData.to || '-'}, ETD: ${flightData.etd || '-'}Z, ETA: ${flightData.eta || '-'}Z`;
+
+    const prompt = `당신은 상업항공 A380 기장을 위한 비행 전 NOTAM 브리핑 어시스턴트입니다.
+
+비행 정보: ${fltInfo}
+통과 FIR: ${firList}
+
+아래는 OFP NOTAM PACKAGE 3의 FIR NOTAM 원문입니다.
+
+---
+${pkg3Text}
+---
+
+다음 규칙에 따라 한국어로 요약하세요:
+
+1. FIR별로 구분하여 제목을 표시 (예: ▶ RKRR (인천 FIR))
+2. 각 FIR에서 A380 운항에 실질적 영향을 주는 NOTAM만 선별
+3. 영향도 순으로 정렬: ①공역제한/항로폐쇄 ②GPS/RAIM 장애 ③흐름통제(Flow Control) ④기타
+4. 각 항목은 2~3줄 이내로 핵심만 요약
+5. 운항 영향이 없는 NOTAM(참고용, 항공기 등록 변경 등)은 제외
+6. "NO SIGNIFICANT NOTAM"인 FIR은 한 줄로 표시
+7. 전체 응답은 최대 400단어 이내
+
+※ 이 요약은 참고용 보조자료입니다. Primary NOTAM 소스는 Jeppesen Aviator 공식 브리핑입니다.`;
+
+    try {
+        const resp = await fetch('https://api.anthropic.com/v1/messages', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'x-api-key': apiKey,
+                'anthropic-version': '2023-06-01',
+                'anthropic-dangerous-direct-browser-access': 'true'
+            },
+            body: JSON.stringify({
+                model: 'claude-sonnet-4-6',
+                max_tokens: 1024,
+                messages: [{ role: 'user', content: prompt }]
+            })
+        });
+
+        if (!resp.ok) {
+            const errText = await resp.text();
+            throw new Error(`API ${resp.status}: ${errText.slice(0, 120)}`);
+        }
+
+        const data = await resp.json();
+        const summary = data?.content?.[0]?.text || '';
+        if (!summary) throw new Error('응답 텍스트 없음');
+
+        flightData.firAiSummary = summary;
+        flightData.firAiStatus = 'done';
+
+    } catch (err) {
+        console.error('[FIR AI] 요약 실패:', err);
+        flightData.firAiStatus = 'error';
+        flightData.firAiSummary = `요약 실패: ${err.message}`;
+    }
+
+    // 결과 반영
+    if (activeEraFirNotamTab === 'FIR') {
+        const tbody = document.querySelector('#era-fir-notam-table-body');
+        if (tbody) tbody.innerHTML = getFirNotamTableHTML();
+        // 페이지 제목 업데이트 (FIR 수 표시)
+        if (pageTitleText) {
+            const cnt = flightData.firNotamSections.length;
+            pageTitleText.textContent = `ACTIVE/ERA·FIR NOTAM`;
+        }
+    }
+}
+
+// ── API 키 관리 (localStorage) ──────────────────────────────────────
+
+function getOrAskApiKey() {
+    let key = localStorage.getItem('anthropic_api_key') || '';
+    if (!key) {
+        key = prompt(
+            '🔑 Anthropic API 키를 입력하세요.\n' +
+            '(한 번 입력하면 이 기기에 저장됩니다)\n\n' +
+            'console.anthropic.com → API Keys에서 발급'
+        );
+        if (key && key.trim()) {
+            localStorage.setItem('anthropic_api_key', key.trim());
+            key = key.trim();
+        }
+    }
+    return key || '';
+}
+
+function clearApiKey() {
+    localStorage.removeItem('anthropic_api_key');
+    alert('API 키가 삭제되었습니다.');
+}
+
+// ── FIR NOTAM 표시 ──────────────────────────────────────────────────
+
+function buildFirNotamDisplayLines() {
+    const status  = flightData.firAiStatus;
+    const summary = flightData.firAiSummary;
+    const sections = flightData.firNotamSections;
+    const lines = [];
+
+    if (!sections || sections.length === 0) {
+        lines.push({ type: 'body', text: '  OFP에서 NOTAM PACKAGE 3를 찾지 못했습니다.' });
+        lines.push({ type: 'body', text: '  (Aviator OFP PDF를 다시 IMPORT 하세요)' });
+        return lines;
+    }
+
+    // 상태 헤더
+    if (status === 'loading') {
+        lines.push({ type: 'etp-title', text: '⏳  AI 요약 생성 중...' });
+        lines.push({ type: 'blank', text: '' });
+        lines.push({ type: 'body', text: '  Claude Sonnet이 FIR NOTAM을 분석하고 있습니다.' });
+        lines.push({ type: 'body', text: '  잠시 기다려 주세요 (10~30초).' });
+        return lines;
+    }
+
+    if (status === 'error') {
+        lines.push({ type: 'hdr-amber', text: '⚠️  AI 요약 오류' });
+        lines.push({ type: 'blank', text: '' });
+        wrapText('  ' + (summary || '알 수 없는 오류'), 72).forEach(ln =>
+            lines.push({ type: 'body', text: ln })
+        );
+        lines.push({ type: 'blank', text: '' });
+        lines.push({ type: 'body', text: '  → IMPORT 후 재시도하거나 API 키를 확인하세요.' });
+        return lines;
+    }
+
+    if (status === 'done' && summary) {
+        // 면책 고지
+        lines.push({ type: 'hdr-amber', text: '⚠️  보조자료 — Primary: Jeppesen Aviator' });
+        lines.push({ type: 'blank', text: '' });
+
+        // AI 요약 본문 — FIR 제목(▶)은 헤더로, 나머지는 body로
+        const summaryLines = summary.split('\n');
+        for (const sl of summaryLines) {
+            const trimmed = sl.trim();
+            if (!trimmed) {
+                lines.push({ type: 'blank', text: '' });
+            } else if (/^▶|^#{1,3}\s|^\*\*/.test(trimmed)) {
+                // FIR 제목줄 → etp-title 스타일
+                const clean = trimmed.replace(/^#{1,3}\s+/, '').replace(/^\*\*|\*\*$/g, '');
+                lines.push({ type: 'etp-title', text: clean });
+            } else {
+                // 내용줄 — 74자 wrap
+                wrapText('  ' + trimmed, 74).forEach(ln =>
+                    lines.push({ type: 'body', text: ln })
+                );
+            }
+        }
+        return lines;
+    }
+
+    // idle (PDF 파싱됐지만 아직 API 호출 전 — 정상적으로 도달하지 않아야 함)
+    lines.push({ type: 'body', text: '  FIR NOTAM 데이터 없음.' });
+    return lines;
+}
+
+function getFirNotamTableHTML() {
+    const lines = buildFirNotamDisplayLines();
+    return renderNotamRows(lines, eraFirNotamScrollIndex);
+}
+
+// ══════════════════════════════════════════════════════════════════
+//  METAR  —  aviationweather.gov  (무료, 키 없음, 15분 캐싱)
+// ══════════════════════════════════════════════════════════════════
+
+const METAR_CACHE_MS = 15 * 60 * 1000; // 15분
+
+async function fetchMetar() {
+    const dep = (flightData.from || '').trim();
+    const arr = (flightData.to  || '').trim();
+    if (!dep || !arr) return;
+
+    // 15분 캐싱 — 마지막 fetch 후 15분 미만이면 API 호출 생략
+    const now = Date.now();
+    if (flightData.metarCacheTime && (now - flightData.metarCacheTime) < METAR_CACHE_MS) {
+        console.log('[METAR] Cache hit — skipping fetch');
+        return;
+    }
+
+    console.log(`[METAR] Fetching for ${dep}, ${arr}`);
+    const url = `https://aviationweather.gov/api/data/metar?ids=${dep},${arr}&format=json&hours=2`;
+
+    try {
+        const resp = await fetch(url);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+
+        flightData.depMetar = null;
+        flightData.arrMetar = null;
+
+        for (const m of data) {
+            const icao = (m.icaoId || m.stationId || '').toUpperCase();
+            const entry = {
+                raw:             m.rawOb || m.rawMETAR || '',
+                flight_category: m.flightCategory || m.flightCat || '',
+                observed:        m.obsTime || m.reportTime || '',
+                temp:            m.temp   != null ? m.temp   : null,
+                dewp:            m.dewp   != null ? m.dewp   : null,
+                wdir:            m.wdir   != null ? m.wdir   : null,
+                wspd:            m.wspd   != null ? m.wspd   : null,
+                visib:           m.visib  != null ? m.visib  : null,
+                altim:           m.altim  != null ? m.altim  : null,  // hPa
+            };
+            if (icao === dep.toUpperCase()) flightData.depMetar = entry;
+            if (icao === arr.toUpperCase()) flightData.arrMetar = entry;
+        }
+
+        flightData.metarCacheTime = now;
+        console.log('[METAR] Done —', dep, flightData.depMetar?.raw?.slice(0, 40),
+                                     arr, flightData.arrMetar?.raw?.slice(0, 40));
+
+    } catch (err) {
+        console.error('[METAR] fetch 실패:', err);
+    }
+}
+
+function getMetarCategoryColor(cat) {
+    switch ((cat || '').toUpperCase()) {
+        case 'VFR':  return '#00e676';   // 초록
+        case 'MVFR': return '#4fc3f7';   // 하늘색
+        case 'IFR':  return '#ff6b6b';   // 빨강
+        case 'LIFR': return '#ce93d8';   // 보라
+        default:     return '#ffffff';
+    }
+}
+
+function buildMetarRows(metarObj, label) {
+    // FMS 스타일 2~3행으로 METAR 표시
+    if (!metarObj || !metarObj.raw) {
+        return `<tr style="height:22px;">
+            <td style="padding:2px 6px; font-size:0.7rem; font-family:'Share Tech Mono',monospace; color:#666;">
+                ${label} METAR — 데이터 없음 (인터넷 연결 확인)
+            </td></tr>`;
+    }
+    const cat   = metarObj.flight_category || '';
+    const color = getMetarCategoryColor(cat);
+    const catBadge = cat
+        ? `<span style="background:${color}22; color:${color}; border:1px solid ${color};
+               border-radius:3px; padding:0 4px; font-size:0.65rem; margin-right:6px;">${cat}</span>`
+        : '';
+
+    // 관측시각 포맷: "2026-06-23T04:00:00Z" → "0400Z"
+    let obsStr = '';
+    if (metarObj.observed) {
+        const d = new Date(metarObj.observed * 1000 || metarObj.observed);
+        if (!isNaN(d)) {
+            const hh = String(d.getUTCHours()).padStart(2,'0');
+            const mm = String(d.getUTCMinutes()).padStart(2,'0');
+            obsStr = `${hh}${mm}Z`;
+        }
+    }
+
+    const raw = metarObj.raw || '';
+    // 원문을 72자씩 줄바꿈
+    const chunks = [];
+    for (let i = 0; i < raw.length; i += 72) chunks.push(raw.slice(i, i + 72));
+
+    let html = `<tr style="height:20px;">
+        <td style="padding:1px 6px; font-size:0.68rem; font-family:'Share Tech Mono',monospace;">
+            ${catBadge}<span style="color:#aaa;">${label} METAR ${obsStr ? '(' + obsStr + ')' : ''}</span>
+        </td></tr>`;
+    for (const chunk of chunks) {
+        html += `<tr style="height:auto;">
+            <td style="padding:1px 6px 3px; font-size:0.7rem; font-family:'Share Tech Mono',monospace;
+                       color:${color}; word-break:break-all; line-height:1.35;">
+                ${chunk}
+            </td></tr>`;
+    }
+    html += `<tr style="height:6px;"><td></td></tr>`; // 구분 여백
+    return html;
+}
+
+// ══════════════════════════════════════════════════════════════════
+//  GATE  —  AeroDataBox via RapidAPI
+// ══════════════════════════════════════════════════════════════════
+
+function getOrAskAeroDataBoxKey() {
+    let key = localStorage.getItem('aerodatabox_api_key') || '';
+    if (!key) {
+        key = prompt(
+            '✈️ AeroDataBox API 키 입력 (게이트 정보용)\n' +
+            '(한 번 입력하면 이 기기에 저장됩니다)\n\n' +
+            'rapidapi.com → AeroDataBox 검색 → Subscribe → API Key'
+        );
+        if (key && key.trim()) {
+            localStorage.setItem('aerodatabox_api_key', key.trim());
+            key = key.trim();
+        }
+    }
+    return key || '';
+}
+
+function clearAeroDataBoxKey() {
+    localStorage.removeItem('aerodatabox_api_key');
+    alert('AeroDataBox API 키 삭제됨');
+}
+
+async function fetchGate() {
+    const fltNbr = (flightData.fltNbr || '').replace(/\s+/g, '').toUpperCase(); // "OZ202"
+    const etdStr = flightData.etd || '';   // "03:40"
+    const depDay = flightData.flightDay || '';  // "07"
+
+    if (!fltNbr || !etdStr) {
+        console.warn('[GATE] fltNbr 또는 ETD 없음');
+        return;
+    }
+
+    const apiKey = getOrAskAeroDataBoxKey();
+    if (!apiKey) {
+        flightData.gateStatus = 'error';
+        return;
+    }
+
+    flightData.gateStatus = 'loading';
+    flightData.depGate = '';
+    flightData.depTerminal = '';
+
+    // AeroDataBox: GET /flights/number/{flightNumber}/{date}
+    // date 형식: YYYY-MM-DD  (OFP flightDay가 DD형식이라 현재년월 붙임)
+    const today = new Date();
+    const yyyy  = today.getUTCFullYear();
+    const mm    = String(today.getUTCMonth() + 1).padStart(2, '0');
+    const dd    = depDay.padStart(2, '0');
+    const dateStr = `${yyyy}-${mm}-${dd}`;
+
+    const url = `https://aerodatabox.p.rapidapi.com/flights/number/${fltNbr}/${dateStr}`;
+    console.log('[GATE] Fetching:', url);
+
+    try {
+        const resp = await fetch(url, {
+            headers: {
+                'x-rapidapi-key':  apiKey,
+                'x-rapidapi-host': 'aerodatabox.p.rapidapi.com'
+            }
+        });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+
+        // 응답은 배열 — ETD에 가장 가까운 편 선택
+        const flights = Array.isArray(data) ? data : [data];
+        let best = flights[0];
+        if (flights.length > 1 && etdStr) {
+            const [th, tm] = etdStr.split(':').map(Number);
+            const etdMin = th * 60 + tm;
+            best = flights.reduce((prev, cur) => {
+                const parseMin = (s) => {
+                    if (!s) return 9999;
+                    const t = s.replace(/.*T/, '').replace('Z', '').slice(0, 5);
+                    const [h, m] = t.split(':').map(Number);
+                    return (h || 0) * 60 + (m || 0);
+                };
+                const pd = Math.abs(parseMin(prev?.departure?.scheduledTime?.utc) - etdMin);
+                const cd = Math.abs(parseMin(cur?.departure?.scheduledTime?.utc)  - etdMin);
+                return cd < pd ? cur : prev;
+            });
+        }
+
+        const dep = best?.departure;
+        flightData.depGate     = dep?.gate     || dep?.terminal?.gate     || '';
+        flightData.depTerminal = dep?.terminal?.name || dep?.terminal || '';
+        flightData.gateStatus  = 'done';
+
+        console.log('[GATE] Done — Gate:', flightData.depGate, 'Terminal:', flightData.depTerminal);
+
+        // INIT 페이지가 열려 있으면 게이트 표시 즉시 갱신
+        const gateEl = document.getElementById('dep-gate-display');
+        if (gateEl) {
+            gateEl.textContent = buildGateLabel();
+            gateEl.style.color = flightData.depGate ? 'var(--text-cyan)' : '#666';
+        }
+
+    } catch (err) {
+        console.error('[GATE] fetch 실패:', err);
+        flightData.gateStatus = 'error';
+        flightData.depGate = 'ERR';
+        const gateEl = document.getElementById('dep-gate-display');
+        if (gateEl) { gateEl.textContent = 'GATE ERR'; gateEl.style.color = '#ff6b6b'; }
+    }
+}
+
+function buildGateLabel() {
+    const g = flightData.depGate;
+    const t = flightData.depTerminal;
+    const s = flightData.gateStatus;
+    if (s === 'loading') return '...';
+    if (!g && s === 'done') return 'N/A';
+    if (!g) return '---';
+    return t ? `T${t} G${g}` : `GATE ${g}`;
+}
+
 // ── Rule filtering ───────────────────────────────────────────────
 
 function notamPassesRules(entry, airport, flightData) {
@@ -1570,9 +2046,9 @@ function renderInitPage() {
             </div>
         </div>
 
-        <!-- Row 2: FROM TO ALTN -->
+        <!-- Row 2: FROM TO ALTN + GATE -->
         <div class="fms-row">
-            <div class="fms-cell" style="justify-content: flex-start; gap: 8px;">
+            <div class="fms-cell" style="justify-content: flex-start; gap: 8px; flex-wrap: wrap;">
                 <span class="fms-label">FROM</span>
                 <div class="fms-val-box extracted-value airport-box">
                     <input type="text" value="${flightData.from}" data-field="from">
@@ -1585,6 +2061,15 @@ function renderInitPage() {
                 <div class="fms-val-box extracted-value altn-airport-box">
                     <input type="text" value="${flightData.altn}" data-field="altn">
                 </div>
+                <span style="color: var(--text-white); font-weight: 700; font-size: 0.8rem; margin: 0 4px 0 8px;">GATE</span>
+                <span id="dep-gate-display"
+                      onclick="clearAeroDataBoxKey(); fetchGate();"
+                      title="탭하면 API 키 초기화 후 재조회"
+                      style="color:${flightData.depGate ? 'var(--text-cyan)' : '#666'};
+                             font-family:'Share Tech Mono',monospace; font-size:0.8rem;
+                             cursor:pointer; min-width:60px;">
+                    ${buildGateLabel()}
+                </span>
             </div>
         </div>
 
@@ -2037,11 +2522,20 @@ function getDepArrWxTableHTML() {
     let rawLines = [];
     let targetDay = '';
     let targetTime = '';
-    
-    if (activeDepArrWxTab === 'DEP') {
+
+    const isDepTab = activeDepArrWxTab === 'DEP';
+
+    // ── METAR 행 (항상 상단에 표시) ──────────────────────────────
+    const metarObj = isDepTab ? flightData.depMetar : flightData.arrMetar;
+    const metarLabel = isDepTab
+        ? (flightData.from || 'DEP')
+        : (flightData.to   || 'ARR');
+    html += buildMetarRows(metarObj, metarLabel);
+    // ─────────────────────────────────────────────────────────────
+
+    if (isDepTab) {
         if (!flightData.depWeatherRaw || flightData.depWeatherRaw.length === 0) {
-            // Return empty lines placeholder
-            for (let i = 0; i < 13; i++) {
+            for (let i = 0; i < 10; i++) {
                 html += `<tr style="height: 24px;"><td style="padding: 2px 4px;"></td></tr>`;
             }
             return html;
@@ -2051,41 +2545,34 @@ function getDepArrWxTableHTML() {
         targetTime = flightData.etd || '17:10';
     } else {
         if (!flightData.arrWeatherRaw || flightData.arrWeatherRaw.length === 0) {
-            // Return empty lines placeholder
-            for (let i = 0; i < 13; i++) {
+            for (let i = 0; i < 10; i++) {
                 html += `<tr style="height: 24px;"><td style="padding: 2px 4px;"></td></tr>`;
             }
             return html;
         }
         rawLines = flightData.arrWeatherRaw;
-        
         const depDay = flightData.flightDay || '08';
         const depTime = flightData.etd || '17:10';
         const arrTime = flightData.eta || '06:12';
         targetDay = getArrivalDay(depDay, depTime, arrTime);
         targetTime = arrTime;
     }
-    
-    const tafData = parseTafLines(rawLines, targetDay, targetTime);
 
-    for (let i = 0; i < 13; i++) {
+    // ── TAF (OFP 원문) ────────────────────────────────────────────
+    const tafData = parseTafLines(rawLines, targetDay, targetTime);
+    for (let i = 0; i < 10; i++) {   // METAR 행 추가로 TAF는 10행으로 축소
         const item = tafData[i];
         if (!item) {
-            html += `
-                <tr style="height: 24px;">
-                    <td style="padding: 2px 4px;"></td>
-                </tr>
-            `;
+            html += `<tr style="height: 24px;"><td style="padding: 2px 4px;"></td></tr>`;
             continue;
         }
-        
         html += `
             <tr style="height: auto;">
-                <td style="font-size: 0.72rem; line-height: 1.35; padding: 4px 6px; font-family: 'Share Tech Mono', monospace; word-break: break-all; text-align: left;">
+                <td style="font-size: 0.72rem; line-height: 1.35; padding: 4px 6px;
+                           font-family: 'Share Tech Mono', monospace; word-break: break-all; text-align: left;">
                     ${formatTafLine(item)}
                 </td>
-            </tr>
-        `;
+            </tr>`;
     }
     return html;
 }
@@ -2400,6 +2887,7 @@ function renderNotamRows(lines, scrollIndex) {
         const isHdr = item.type.startsWith('hdr');
         const color = item.type === 'hdr-red'    ? '#ff6b6b'
                     : item.type === 'hdr-yellow'  ? '#f0c040'
+                    : item.type === 'hdr-amber'   ? '#ffbf00'
                     : item.type === 'hdr-green'   ? 'var(--text-green)'
                     : item.type === 'body-hl'     ? '#ffffff'
                     : '#ffffff';
@@ -2544,7 +3032,10 @@ function getEnrteNotamTableHTML() {
 }
 
 function getEraFirNotamTableHTML() {
-    // ERA and FIR NOTAM — future: parse from NOTAM PACKAGE 2 [ERA] / PACKAGE 3 [FIR]
+    if (activeEraFirNotamTab === 'FIR') {
+        return getFirNotamTableHTML();
+    }
+    // ERA — future: parse from NOTAM PACKAGE 2 [ERA]
     return renderNotamRows([], eraFirNotamScrollIndex);
 }
 
@@ -2584,9 +3075,25 @@ function renderEraFirNotamPage() {
 
         <!-- Row 2: tab subtitle -->
         <div class="fms-row" style="margin-bottom: 4px;">
-            <div class="fms-cell" style="justify-content: flex-start; gap: 8px; font-size: 0.9rem;">
-                <span class="text-white-fms">${isEraActive ? 'ERA NOTAM' : 'FIR NOTAM'}</span>
-                <span style="color:#666; font-size:0.78rem; margin-left:8px;">— 미구현 (PACKAGE ${isEraActive ? '2 ERA' : '3 FIR'})</span>
+            <div class="fms-cell" style="justify-content: space-between; align-items: center; width: 100%;">
+                <span class="text-white-fms" style="font-size:0.85rem;">
+                    ${isEraActive
+                        ? 'ERA NOTAM — 미구현 (PACKAGE 2 ERA)'
+                        : (() => {
+                            const s = flightData.firAiStatus;
+                            const cnt = (flightData.firNotamSections || []).length;
+                            if (cnt === 0) return 'FIR NOTAM — OFP 미로드';
+                            if (s === 'loading') return `FIR NOTAM (${cnt}개 FIR) — AI 요약 중...`;
+                            if (s === 'done')    return `FIR NOTAM (${cnt}개 FIR) — AI 요약 완료`;
+                            if (s === 'error')   return `FIR NOTAM (${cnt}개 FIR) — 요약 오류`;
+                            return `FIR NOTAM (${cnt}개 FIR)`;
+                          })()
+                    }
+                </span>
+                ${!isEraActive ? `<button onclick="clearApiKey()" style="
+                    background:#1e2230; border:1px solid #666; border-radius:3px;
+                    color:#888; font-size:0.65rem; padding:2px 6px; cursor:pointer;
+                    font-family:inherit;">🔑 API KEY</button>` : ''}
             </div>
         </div>
 
@@ -3083,7 +3590,8 @@ document.body.addEventListener('click', (e) => {
 
     // DEP/ARR WX trigger from INIT page
     if (e.target.closest('.btn-dep-arr-wx-trigger')) {
-        renderDepArrWxPage();
+        fetchMetar().then(() => renderDepArrWxPage());
+        return;
     }
 
     // DEP/ARR NOTAM trigger from INIT page
@@ -3237,7 +3745,10 @@ document.body.addEventListener('click', (e) => {
 
     // Scroll ERA/FIR NOTAM table
     if (e.target.closest('#btn-era-fir-notam-scroll-down')) {
-        const max = Math.max(0, 0 - 13); // no data yet
+        const firLines = activeEraFirNotamTab === 'FIR'
+            ? buildFirNotamDisplayLines().length
+            : 0;
+        const max = Math.max(0, firLines - 13);
         eraFirNotamScrollIndex = Math.min(eraFirNotamScrollIndex + 13, max);
         const tbody = document.querySelector('#era-fir-notam-table-body');
         if (tbody) tbody.innerHTML = getEraFirNotamTableHTML();
@@ -3748,13 +4259,21 @@ if (fileInputEl) {
         flightData.altnWeatherRaw = extractWeatherSection(fullText, 'ALTERNATE WEATHER');
         flightData.enrteWeatherRaw = extractWeatherSection(fullText, 'ENROUTE WEATHER');
 
-        // NOTAM PACKAGE 1 & 2 parsing
+        // NOTAM PACKAGE 1, 2 & 3 parsing
         flightData.depNotamEntries  = [];
         flightData.arrNotamEntries  = [];
         flightData.altnNotamEntries = [];
         flightData.etpNotamSections = [];
+        flightData.firNotamSections = [];
+        flightData.firAiSummary = '';
+        flightData.firAiStatus = 'idle';
         extractNotamPackage1(fullText);
         extractNotamPackage2(fullText);
+        extractNotamPackage3(fullText);  // FIR NOTAM + AI 요약 트리거
+
+        // 실시간 데이터 fetch (METAR 15분 캐싱, 게이트 편명 기반)
+        fetchMetar();
+        fetchGate();
         if (flightData.depWeatherRaw.length > 0 || flightData.arrWeatherRaw.length > 0) {
             matchedCount++;
         }
