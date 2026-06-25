@@ -998,18 +998,6 @@ async function callFirNotamAiSummary() {
         if (tbody) tbody.innerHTML = getFirNotamTableHTML();
     }
 
-    // API 키 가져오기 (localStorage 저장)
-    const apiKey = getOrAskApiKey();
-    if (!apiKey) {
-        flightData.firAiStatus = 'error';
-        flightData.firAiSummary = 'API KEY 없음 — 설정 버튼을 눌러 Anthropic API 키를 입력하세요.';
-        if (activeEraFirNotamTab === 'FIR') {
-            const tbody = document.querySelector('#era-fir-notam-table-body');
-            if (tbody) tbody.innerHTML = getFirNotamTableHTML();
-        }
-        return;
-    }
-
     // PACKAGE 3 전체 원문 합산 (FIR별 구분선 포함)
     const pkg3Text = flightData.firNotamSections
         .map(s => `=== FIR: ${s.fir} ===\n${s.rawText}`)
@@ -1042,19 +1030,10 @@ ${pkg3Text}
 ※ 이 요약은 참고용 보조자료입니다. Primary NOTAM 소스는 Jeppesen Aviator 공식 브리핑입니다.`;
 
     try {
-        const resp = await fetch('https://api.anthropic.com/v1/messages', {
+        const resp = await fetch(`${CKPT_PROXY_BASE}/notam-summary`, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'x-api-key': apiKey,
-                'anthropic-version': '2023-06-01',
-                'anthropic-dangerous-direct-browser-access': 'true'
-            },
-            body: JSON.stringify({
-                model: 'claude-sonnet-4-6',
-                max_tokens: 1024,
-                messages: [{ role: 'user', content: prompt }]
-            })
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt })
         });
 
         if (!resp.ok) {
@@ -1085,29 +1064,6 @@ ${pkg3Text}
             pageTitleText.textContent = `ACTIVE/ERA·FIR NOTAM`;
         }
     }
-}
-
-// ── API 키 관리 (localStorage) ──────────────────────────────────────
-
-function getOrAskApiKey() {
-    let key = localStorage.getItem('anthropic_api_key') || '';
-    if (!key) {
-        key = prompt(
-            '🔑 Anthropic API 키를 입력하세요.\n' +
-            '(한 번 입력하면 이 기기에 저장됩니다)\n\n' +
-            'console.anthropic.com → API Keys에서 발급'
-        );
-        if (key && key.trim()) {
-            localStorage.setItem('anthropic_api_key', key.trim());
-            key = key.trim();
-        }
-    }
-    return key || '';
-}
-
-function clearApiKey() {
-    localStorage.removeItem('anthropic_api_key');
-    alert('API 키가 삭제되었습니다.');
 }
 
 // ── FIR NOTAM 표시 ──────────────────────────────────────────────────
@@ -1183,6 +1139,7 @@ function getFirNotamTableHTML() {
 //  METAR  —  aviationweather.gov  (무료, 키 없음, 15분 캐싱)
 // ══════════════════════════════════════════════════════════════════
 
+const CKPT_PROXY_BASE = 'https://airbus380cbt.com/ckpt-proxy';
 const METAR_CACHE_MS = 15 * 60 * 1000; // 15분
 
 async function fetchMetar() {
@@ -1198,7 +1155,7 @@ async function fetchMetar() {
     }
 
     console.log(`[METAR] Fetching for ${dep}, ${arr}`);
-    const url = `https://aviationweather.gov/api/data/metar?ids=${dep},${arr}&format=json&hours=2`;
+    const url = `${CKPT_PROXY_BASE}/metar?ids=${dep},${arr}`;
 
     try {
         const resp = await fetch(url);
@@ -1294,27 +1251,6 @@ function buildMetarRows(metarObj, label) {
 //  GATE  —  AeroDataBox via RapidAPI
 // ══════════════════════════════════════════════════════════════════
 
-function getOrAskAeroDataBoxKey() {
-    let key = localStorage.getItem('aerodatabox_api_key') || '';
-    if (!key) {
-        key = prompt(
-            '✈️ AeroDataBox API 키 입력 (게이트 정보용)\n' +
-            '(한 번 입력하면 이 기기에 저장됩니다)\n\n' +
-            'rapidapi.com → AeroDataBox 검색 → Subscribe → API Key'
-        );
-        if (key && key.trim()) {
-            localStorage.setItem('aerodatabox_api_key', key.trim());
-            key = key.trim();
-        }
-    }
-    return key || '';
-}
-
-function clearAeroDataBoxKey() {
-    localStorage.removeItem('aerodatabox_api_key');
-    alert('AeroDataBox API 키 삭제됨');
-}
-
 async function fetchGate() {
     const fltNbr = (flightData.fltNbr || '').replace(/\s+/g, '').toUpperCase(); // "OZ202"
     const etdStr = flightData.etd || '';   // "03:40"
@@ -1325,17 +1261,11 @@ async function fetchGate() {
         return;
     }
 
-    const apiKey = getOrAskAeroDataBoxKey();
-    if (!apiKey) {
-        flightData.gateStatus = 'error';
-        return;
-    }
-
     flightData.gateStatus = 'loading';
     flightData.depGate = '';
     flightData.depTerminal = '';
 
-    // AeroDataBox: GET /flights/number/{flightNumber}/{date}
+    // AeroDataBox: GET /flights/number/{flightNumber}/{date}  (via 공용 프록시 — 키는 서버에만 보관)
     // date 형식: YYYY-MM-DD  (OFP flightDay가 DD형식이라 현재년월 붙임)
     const today = new Date();
     const yyyy  = today.getUTCFullYear();
@@ -1343,16 +1273,11 @@ async function fetchGate() {
     const dd    = depDay.padStart(2, '0');
     const dateStr = `${yyyy}-${mm}-${dd}`;
 
-    const url = `https://aerodatabox.p.rapidapi.com/flights/number/${fltNbr}/${dateStr}`;
+    const url = `${CKPT_PROXY_BASE}/gate?flightNumber=${fltNbr}&date=${dateStr}`;
     console.log('[GATE] Fetching:', url);
 
     try {
-        const resp = await fetch(url, {
-            headers: {
-                'x-rapidapi-key':  apiKey,
-                'x-rapidapi-host': 'aerodatabox.p.rapidapi.com'
-            }
-        });
+        const resp = await fetch(url);
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const data = await resp.json();
 
@@ -2061,8 +1986,8 @@ function renderInitPage() {
                 </div>
                 <span style="color: var(--text-white); font-weight: 700; font-size: 0.8rem; margin: 0 4px 0 8px;">GATE</span>
                 <span id="dep-gate-display"
-                      onclick="clearAeroDataBoxKey(); fetchGate();"
-                      title="탭하면 API 키 초기화 후 재조회"
+                      onclick="fetchGate();"
+                      title="탭하면 게이트 재조회"
                       style="color:${flightData.depGate ? 'var(--text-cyan)' : '#666'};
                              font-family:'Share Tech Mono',monospace; font-size:0.8rem;
                              cursor:pointer; min-width:60px;">
@@ -3088,10 +3013,6 @@ function renderEraFirNotamPage() {
                           })()
                     }
                 </span>
-                ${!isEraActive ? `<button onclick="clearApiKey()" style="
-                    background:#1e2230; border:1px solid #666; border-radius:3px;
-                    color:#888; font-size:0.65rem; padding:2px 6px; cursor:pointer;
-                    font-family:inherit;">🔑 API KEY</button>` : ''}
             </div>
         </div>
 
