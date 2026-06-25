@@ -4308,6 +4308,15 @@ if (fileInputEl) {
                 const lines = fullText.split('\n');
                 for (let i = 0; i < lines.length; i++) {
                     const lineStr = lines[i].trim();
+                    // REFILE 섹션/문서 끝 이후로는 메인 루트가 아니므로 중단
+                    // (REFILE FLT PLAN, 페이지 88-96 CFP 복사본 모두 이 지점 이후에 위치)
+                    if (
+                        lineStr.includes('REFILE FLT PLAN') ||
+                        lineStr.includes('END OF JEPPESEN') ||
+                        lineStr.includes('ROUTE TO ALTN')
+                    ) {
+                        break;
+                    }
                     const matchCoord = lineStr.match(coordRe);
                     if (matchCoord) {
                         const wpt = matchCoord[1];
