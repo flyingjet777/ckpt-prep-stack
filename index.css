@@ -150,6 +150,11 @@ body {
     color: #ffffff;
 }
 
+/* ACTIVE / MEMO는 실제 기능이 있는 버튼이므로 항상 흰색 테두리로 구분 */
+#btn-init, #btn-data {
+    border: 2px solid var(--text-white);
+}
+
 /* Title text underneath menu */
 .page-title-bar {
     background-color: #ffffff;

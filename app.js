@@ -21,8 +21,11 @@ const flightData = {
     fob: '',   
     zfw: '',   
     zfwcg: '',
-    taxi: '',    
+    taxi: '',
     paxNbr: '',
+    paxBiz: '',
+    paxEco: '',
+    cargoTons: '',
     trip: '',  
     tripTime: '',
     rteRsv: '', 
@@ -36,6 +39,9 @@ const flightData = {
     fod: '',
     ccf: '',
     tank: '',
+    fuelStatMean: '',
+    fuelStat95: '',
+    fuelStat99: '',
     acftReg: '',
     etd: '',
     eta: '',
@@ -75,6 +81,13 @@ function resetFlightData() {
         else flightData[key] = '';
     }
     melCdlData = [];
+    routeData = [];
+    altnRouteData = [];
+    lolvEtpData = [];
+    eraValidationData = [];
+    refileFltPlanData = null;
+    atsFplCompareResult = null;
+    altnRteScrollIndex = 0;
     stepAltData.length = 0;
     // Add default blank rows so the screen has visual placeholders when empty
     stepAltData.push({ wpt: '--------', alt: '---', dist: '', time: '' });
@@ -374,7 +387,8 @@ function parseTafLinesWithWindow(rawLines, windowHours, allowedIcaos = null) {
     
     rawLines.forEach((lineText, originalIndex) => {
         const line = lineText.trim();
-        if (line.match(/^\s*TAF\b/i)) {
+        // PDF 추출 시 "TAF HNL"의 공백이 사라져 "TAFHNL"처럼 붙는 경우가 있어 \b 없이 매칭
+        if (line.match(/^\s*TAF/i)) {
             if (currentBlock) {
                 airportBlocks.push(currentBlock);
             }
@@ -685,10 +699,159 @@ function parseStepAlts(routeStr, fromAirport, fullText) {
     return steps;
 }
 
+function extractFplDepRouteArr(fplBlockText) {
+    const lines = fplBlockText.split('\n').map(l => l.trim());
+    let dep = '', arr = '', routeStr = '';
+    let inRoute = false;
+    for (const line of lines) {
+        const depMatch = line.match(/^-([A-Z]{4})(\d{4})$/);
+        if (depMatch && !dep) { dep = depMatch[1]; continue; }
+        if (line.match(/^-[NKM]\d{3,4}[FSAM]\d{3,4}/)) {
+            inRoute = true;
+            routeStr += line + ' ';
+            continue;
+        }
+        if (inRoute) {
+            if (line.startsWith('-')) {
+                const arrMatch = line.match(/^-([A-Z]{4})(\d{4})\b/);
+                if (arrMatch) arr = arrMatch[1];
+                inRoute = false;
+                continue;
+            }
+            routeStr += line + ' ';
+        }
+    }
+    return { dep, arr, route: routeStr.trim().replace(/\s+/g, ' ') };
+}
+
+function extractAtsFplComparisonResult(fullText) {
+    // OFP 안에 "(FPL-<편명>-I..." 블록이 두 번 나오는 경우(디스패치 릴리스용 + ATS FPL 사본)
+    // 출발공항/루트/도착공항을 서로 비교해서 일치 여부를 판정
+    const fplRe = /\(FPL-[A-Z0-9]+-I[\s\S]*?\)/g;
+    const blocks = [];
+    let m;
+    while ((m = fplRe.exec(fullText)) !== null) blocks.push(m[0]);
+    if (blocks.length < 2) return null;
+    const a = extractFplDepRouteArr(blocks[0]);
+    const b = extractFplDepRouteArr(blocks[1]);
+    const isMatch = a.dep === b.dep && a.arr === b.arr && a.route === b.route;
+    return { isMatch, a, b };
+}
+
+function extractAltnRoute(fullText) {
+    // "ROUTE TO ALTN : KJFK..DIXIE..JIIMS4 KPHL" → ".." 는 DCT를 의미, DEST 공항은 제외하고 표시
+    const m = fullText.match(/ROUTE TO ALTN\s*:\s*(.+)/i);
+    if (!m) return [];
+    const tokens = m[1].trim().replace(/\.\./g, ' ').split(/\s+/).filter(Boolean);
+    tokens.shift(); // 첫 토큰(DEST 공항) 제외
+    return tokens.map(wpt => ({ airway: 'DCT', waypoint: wpt }));
+}
+
+function formatLatLonDecimal(coord) {
+    // "N40582" → "N4058.2" (마지막 자리 앞에 소수점)
+    const m = (coord || '').match(/^([NSEW])(\d+)$/);
+    if (!m) return coord || '';
+    const digits = m[2];
+    return m[1] + digits.slice(0, -1) + '.' + digits.slice(-1);
+}
+
+function extractLolvEtpData(fullText) {
+    // "LOLV EQUAL TIME POINT DATA" 블록에서 ETP 구간(예: RJCC-PANC)과 좌표(LAT/LONG)를 순서대로 매칭.
+    // 실제 유효한 ETP는 보통 2~3개뿐이며, 좌표 개수만큼만 잘라내면 그 뒤에 섞여 들어오는
+    // (좌표 없는) 무관한 구간 라벨이 자동으로 걸러짐.
+    const lolvRe = /LOLV\s+EQUAL TIME POINT DATA([\s\S]*?)(?=\n\s*\n\s*I HEREBY|$)/i;
+    const m = fullText.match(lolvRe);
+    if (!m) return [];
+    const block = m[1];
+    // 공항 구간은 항상 4자리 ICAO 코드 — ICN/SYD/DAD/CAN 같은 3자리(IATA류) 코드는 제외
+    const pairRe = /\b([A-Z]{4})-([A-Z]{4})\b/g;
+    const pairs = [];
+    let pm;
+    while ((pm = pairRe.exec(block)) !== null) pairs.push({ from: pm[1], to: pm[2] });
+    const llRe = /LAT\/LONG\s+([NS]\d{4,6})\s+([EW]\d{5,7})/g;
+    const coords = [];
+    let lm;
+    while ((lm = llRe.exec(block)) !== null) coords.push({ lat: lm[1], lon: lm[2] });
+    // 유효한 ETP는 보통 2~4개뿐 — 그 이상은 무관한 참고용 데이터이므로 최대 4개로 제한.
+    // 또한 좌표가 이전 항목과 완전히 동일하면(우연히 매칭된 무관한 구간 라벨) 건너뛴다.
+    const maxEntries = Math.min(4, pairs.length, coords.length);
+    const seenCoords = new Set();
+    const result = [];
+    for (let i = 0; i < maxEntries; i++) {
+        const key = coords[i].lat + ' ' + coords[i].lon;
+        if (seenCoords.has(key)) continue;
+        seenCoords.add(key);
+        result.push({
+            from: pairs[i].from, to: pairs[i].to,
+            lat: formatLatLonDecimal(coords[i].lat),
+            lon: formatLatLonDecimal(coords[i].lon)
+        });
+    }
+    return result;
+}
+
+function extractEraValidationData(fullText) {
+    // "3% CONTINGENCY ERA VALIDATION" 블록 — ERA 공항 코드 + COC 좌표(이미 10진법으로 표기됨)
+    const m = fullText.match(/3%\s+CONTINGENCY ERA VALIDATION([\s\S]*?)-{3,}/i);
+    if (!m) return [];
+    const block = m[1];
+    const re = /\b([A-Z]{4})\s+([NS]\d+\.\d)\s+\d+\s+\d+\s+\d+\s+\d+\s+[\d.]+\s+\d+\s*\n\s*([EW]\d+\.\d)/g;
+    const out = [];
+    let mm;
+    while ((mm = re.exec(block)) !== null) {
+        out.push({ era: mm[1], lat: mm[2], lon: mm[3] });
+    }
+    return out;
+}
+
+function extractRefileFltPlanData(fullText) {
+    // "REFILE FLT PLAN <편명> <날짜>" 블록 — 좌/우 두 구간이 같은 줄에 나란히 있어
+    // 헤더 줄에서 두 번째 구간이 시작하는 컬럼 위치를 찾아 좌/우를 분리해서 각각 파싱한다.
+    const headerMatch = fullText.match(/REFILE FLT PLAN\s+([A-Z0-9]+)\s+(\d{1,2}\/[A-Z]{3}\/\d{2})/i);
+    if (!headerMatch) return null;
+    const blockMatch = fullText.slice(headerMatch.index).match(/^[\s\S]*?(?=\nDIST\s+LATITUDE|$)/i);
+    const block = blockMatch ? blockMatch[0] : '';
+    const blockLines = block.split('\n');
+
+    const segHeaderLine = blockLines.find(l => /-\s+[A-Z0-9]{2,6}\s+TO\s+[A-Z0-9]{2,6}/.test(l));
+    let splitCol = null;
+    if (segHeaderLine) {
+        const matches = [...segHeaderLine.matchAll(/-\s+[A-Z0-9]{2,6}\s+TO\s+[A-Z0-9]{2,6}/g)];
+        if (matches.length >= 2) splitCol = matches[1].index;
+    }
+
+    const leftText  = splitCol != null ? blockLines.map(l => l.slice(0, splitCol)).join('\n') : block;
+    const rightText = splitCol != null ? blockLines.map(l => l.slice(splitCol)).join('\n') : '';
+
+    function parseHalf(text) {
+        const segMatch = text.match(/-\s+([A-Z0-9]{2,6})\s+TO\s+([A-Z0-9]{2,6})/);
+        const rqrdMatch = text.match(/RQRD\s+(\d{3,6})\s+[\d.]+/);
+        const plannedMatch = text.match(/PLANNED R\/F AT REFILE POINT\s+(\d{3,6})/i);
+        return {
+            from: segMatch ? segMatch[1] : '',
+            to: segMatch ? segMatch[2] : '',
+            rqrd: rqrdMatch ? (parseInt(rqrdMatch[1], 10) / 10).toFixed(1) : '',
+            plannedRf: plannedMatch ? (parseInt(plannedMatch[1], 10) / 10).toFixed(1) : ''
+        };
+    }
+
+    const left = parseHalf(leftText);
+    const right = splitCol != null ? parseHalf(rightText) : { from: '', to: '', rqrd: '', plannedRf: '' };
+
+    const segments = [left, right].filter(s => s.from && s.to).map(s => ({ from: s.from, to: s.to, rqrd: s.rqrd }));
+    const plannedRf = left.plannedRf || right.plannedRf || '';
+
+    // "RIF/LEWIT..44N00..4290N..4080N..KIAD" — 마지막에 표시할 RIF 루트
+    const rifMatch = block.match(/RIF\/([^\n]+)/i);
+    const rifRoute = rifMatch ? rifMatch[1].trim().replace(/\.\./g, ' DCT ') : '';
+
+    return { fltNbr: headerMatch[1], date: headerMatch[2], segments, plannedRf, rifRoute };
+}
+
 function extractTurbulenceZones(wpts) {
     let zones = [];
     let currentZone = [];
-    
+
     for (let i = 0; i < wpts.length; i++) {
         const pt = wpts[i];
         const sr = parseInt(pt.sr, 10);
@@ -1719,6 +1882,29 @@ function updateDebugPanel() {
 // --- Route Summary Data ---
 let routeScrollIndex = 0;
 let routeData = [];
+let altnRouteData = [];
+let lolvEtpData = [];
+let eraValidationData = [];
+let refileFltPlanData = null;
+let atsFplCompareResult = null;
+let activeRteSummaryTab = 'PRIMARY'; // 'PRIMARY' | 'ALTERNATE'
+let altnRteScrollIndex = 0;
+
+// ── MEMO (NOTEPAD / DRAWPAD) — 기기별 localStorage 저장, 멀티페이지 ─────────
+let activeMemoTab = 'NOTEPAD'; // 'NOTEPAD' | 'DRAWPAD'
+let memoNotepadPages = (() => {
+    try { return JSON.parse(localStorage.getItem('ckpt_memo_notepad_pages')) || ['']; }
+    catch { return ['']; }
+})();
+let memoNotepadPageIndex = 0;
+let memoDrawpadPages = (() => {
+    try { return JSON.parse(localStorage.getItem('ckpt_memo_drawpad_pages')) || [null]; }
+    catch { return [null]; }
+})();
+let memoDrawpadPageIndex = 0;
+let memoDrawColor = '#888888';
+let memoDrawSize = 3;
+let memoIsErasing = false;
 
 // --- Step Altitude Transition Data ---
 const stepAltData = [
@@ -1912,6 +2098,11 @@ function getFuelTableHTML() {
                         <span style="font-size: 0.75rem; color: var(--text-gray);">(DUE TO ENROUTE CB/TS, TURB)</span><br>
                         <span class="text-green-fms">TANKRG : ${flightData.tank || '0'} LBS</span>
                     </div>
+                    ${flightData.fuelStatMean ? `
+                    <div style="font-size: 0.78rem; font-weight: bold; margin-top: 4px;">
+                        <span style="color: var(--text-white);">ROUTE FUEL CONSUMPTION STATISTICS</span><br>
+                        <span class="text-green-fms">MEAN/95%/99% = ${flightData.fuelStatMean}/${flightData.fuelStat95}/${flightData.fuelStat99} (LBS)</span>
+                    </div>` : ''}
                 </div>
                 <div style="width: 0 !important; margin: 0; padding: 0;"></div>
                 <div style="width: 0 !important; margin: 0; padding: 0;"></div>
@@ -2147,8 +2338,112 @@ function getRteSummaryTableHTML() {
 function updateRteTableOnly() {
     const tbody = document.querySelector('.rte-summary-table tbody');
     if (tbody) {
-        tbody.innerHTML = getRteSummaryTableHTML();
+        tbody.innerHTML = activeRteSummaryTab === 'PRIMARY' ? getRteSummaryTableHTML() : getAltnRteSummaryTableHTML();
     }
+}
+
+// ALTERNATE RTEs 페이지의 모든 섹션(루트/LOLV/ERA/REFILE)을 하나의 행 목록으로 합쳐서
+// PRIMARY RTEs와 동일하게 ▼▼/▲▲ 버튼으로 13행씩 페이지 단위 이동(스크롤 없음)을 구현
+function buildAltnRteRows() {
+    const rows = [];
+    for (let i = 0; i < Math.ceil(altnRouteData.length / 2); i++) {
+        const pair1 = altnRouteData[i * 2];
+        const pair2 = altnRouteData[i * 2 + 1];
+        if (!pair1 && !pair2) continue; // 빈 행은 건너뛰어 불필요한 여백 방지
+        rows.push({ type: 'route-pair', pair1, pair2 });
+    }
+    if (lolvEtpData.length) {
+        rows.push({ type: 'spacer-2' });
+        rows.push({ type: 'header', text: 'LOLV EQUAL TIME POINT DATA' });
+        lolvEtpData.forEach(p => rows.push({ type: 'lolv', data: p }));
+        rows.push({ type: 'spacer' });
+    }
+    if (eraValidationData.length) {
+        rows.push({ type: 'header', text: '3% CONTINGENCY ERA VALIDATION' });
+        eraValidationData.forEach(d => rows.push({ type: 'era', data: d }));
+        rows.push({ type: 'spacer' });
+    }
+    if (refileFltPlanData) {
+        rows.push({ type: 'header', text: `REFILE FLT PLAN ${refileFltPlanData.fltNbr} ${refileFltPlanData.date}` });
+        refileFltPlanData.segments.forEach(s => rows.push({ type: 'refile-seg', data: s }));
+        if (refileFltPlanData.plannedRf) rows.push({ type: 'refile-planned', text: refileFltPlanData.plannedRf });
+        if (refileFltPlanData.rifRoute) rows.push({ type: 'refile-rif', text: refileFltPlanData.rifRoute });
+    }
+    return rows;
+}
+
+function getAltnRteRowHTML(row) {
+    switch (row.type) {
+        case 'route-pair':
+            return `
+                <tr>
+                    <td class="text-white-fms" style="width: 22%;">${row.pair1 ? row.pair1.airway : ''}</td>
+                    <td class="text-green-fms" style="width: 25%;">${row.pair1 ? row.pair1.waypoint : ''}</td>
+                    <td class="text-white-fms" style="width: 25%;">${row.pair2 ? row.pair2.airway : ''}</td>
+                    <td class="text-green-fms" style="width: 28%;">${row.pair2 ? row.pair2.waypoint : ''}</td>
+                </tr>
+            `;
+        case 'header':
+            return `<tr style="height:24px;"><td colspan="4" style="font-size:0.68rem; color:var(--text-cyan); font-weight:bold;">${row.text}</td></tr>`;
+        case 'spacer':
+            return `<tr style="height:12px;"><td colspan="4"></td></tr>`;
+        case 'spacer-2':
+            return `<tr style="height:24px;"><td colspan="4"></td></tr>`;
+        case 'lolv':
+            return `
+                <tr>
+                    <td class="text-white-fms" style="width: 22%; font-size:0.75rem;">${row.data.from}-${row.data.to}</td>
+                    <td class="text-green-fms" colspan="3" style="font-size:0.75rem; font-family:'Share Tech Mono',monospace;">
+                        ETP LAT/LONG ${row.data.lat} ${row.data.lon}
+                    </td>
+                </tr>
+            `;
+        case 'era':
+            return `
+                <tr>
+                    <td class="text-green-fms" style="width: 22%; font-size:0.75rem;">${row.data.era}</td>
+                    <td class="text-white-fms" style="width:14%; font-size:0.7rem;">COC</td>
+                    <td colspan="2" class="text-green-fms" style="font-size:0.75rem; font-family:'Share Tech Mono',monospace;">${row.data.lat} ${row.data.lon}</td>
+                </tr>
+            `;
+        case 'refile-seg':
+            return `
+                <tr>
+                    <td class="text-white-fms" style="width: 22%; font-size:0.75rem;">${row.data.from} TO ${row.data.to}</td>
+                    <td colspan="3" class="text-green-fms" style="font-size:0.75rem; font-family:'Share Tech Mono',monospace;">
+                        RQRD ${row.data.rqrd} klbs
+                    </td>
+                </tr>
+            `;
+        case 'refile-planned':
+            return `
+                <tr>
+                    <td colspan="4" class="text-green-fms" style="font-size:0.75rem; font-family:'Share Tech Mono',monospace;">
+                        PLANNED R/F AT REFILE POINT ${row.text} klbs
+                    </td>
+                </tr>
+            `;
+        case 'refile-rif':
+            return `
+                <tr>
+                    <td colspan="4" class="text-green-fms" style="font-size:0.75rem; font-family:'Share Tech Mono',monospace;">
+                        RIF/ ${row.text}
+                    </td>
+                </tr>
+            `;
+        default:
+            return '';
+    }
+}
+
+function getAltnRteSummaryTableHTML() {
+    const rows = buildAltnRteRows();
+    let html = '';
+    for (let i = 0; i < 13; i++) {
+        const row = rows[altnRteScrollIndex + i];
+        html += row ? getAltnRteRowHTML(row) : `<tr style="height:24px;"><td colspan="4"></td></tr>`;
+    }
+    return html;
 }
 
 function getStepAltsTableHTML() {
@@ -2606,6 +2901,12 @@ function renderDepArrWxPage() {
     `;
 }
 
+function getNotamWarningBannerHTML() {
+    return `<div style="text-align:center; font-size:0.7rem; font-weight:bold; color:var(--text-red); margin-bottom:4px;">
+        &lt;중요&gt; OFP NOTAM PACKAGE를 참고하세요
+    </div>`;
+}
+
 function renderDepArrNotamPage() {
     resetTitleBar();
     pageTitleText.textContent = 'ACTIVE/DEP/ARR NOTAM';
@@ -2619,6 +2920,8 @@ function renderDepArrNotamPage() {
             <div class="fms-tab ${isDepActive ? 'active' : ''}" id="tab-dep-notam-active">DEP NOTAM</div>
             <div class="fms-tab ${!isDepActive ? 'active' : ''}" id="tab-arr-notam">ARR NOTAM</div>
         </div>
+
+        ${getNotamWarningBannerHTML()}
 
         <!-- Row 1: FLT NUMBER & Page Number & Navigation -->
         <div class="fms-row" style="margin-bottom: 2px;">
@@ -2862,6 +3165,8 @@ function renderEnrteNotamPage() {
             <div class="fms-tab ${!isAltnActive ? 'active' : ''}" id="tab-enrte-notam-era">EDTO NOTAM</div>
         </div>
 
+        ${getNotamWarningBannerHTML()}
+
         <!-- Row 1: FLT NUMBER & ALTN AIRPORT -->
         <div class="fms-row" style="margin-bottom: 2px;">
             <div class="fms-cell" style="justify-content: space-between; align-items: center; width: 100%;">
@@ -2975,6 +3280,8 @@ function renderEraFirNotamPage() {
             <div class="fms-tab ${isEraActive ? 'active' : ''}" id="tab-era-fir-notam-era">ERA NOTAM</div>
             <div class="fms-tab ${!isEraActive ? 'active' : ''}" id="tab-era-fir-notam-fir">FIR NOTAM</div>
         </div>
+
+        ${getNotamWarningBannerHTML()}
 
         <!-- Row 1: FLT NUMBER & active tab label -->
         <div class="fms-row" style="margin-bottom: 2px;">
@@ -3110,11 +3417,13 @@ function renderRteSummaryPage() {
     pageTitleText.textContent = 'DATA/ROUTE';
     btnInit.classList.remove('active');
 
+    const isPrimary = activeRteSummaryTab === 'PRIMARY';
+
     mainContent.innerHTML = `
         <!-- Folder Tabs -->
         <div class="fms-tabs" style="margin-bottom: 6px;">
-            <div class="fms-tab active">DATABASE RTEs</div>
-            <div class="fms-tab">PILOT STORED RTEs</div>
+            <div class="fms-tab ${isPrimary ? 'active' : ''}" id="tab-rte-primary">PRIMARY RTEs</div>
+            <div class="fms-tab ${!isPrimary ? 'active' : ''}" id="tab-rte-alternate">ALTERNATE RTEs</div>
         </div>
 
         <!-- Row 1: RTE IDENT & Page Number & Navigation -->
@@ -3140,16 +3449,16 @@ function renderRteSummaryPage() {
         <div class="fms-row" style="margin-bottom: 4px;">
             <div class="fms-cell" style="justify-content: flex-start; gap: 8px; font-size: 0.9rem;">
                 <span class="text-white-fms">FROM</span>
-                <span class="text-green-fms" style="font-weight: bold; margin-right: 15px;">${flightData.from || '----'}</span>
+                <span class="text-green-fms" style="font-weight: bold; margin-right: 15px;">${isPrimary ? (flightData.from || '----') : (flightData.to || '----')}</span>
                 <span class="text-white-fms">TO</span>
-                <span class="text-green-fms" style="font-weight: bold;">${flightData.to || '----'}</span>
+                <span class="text-green-fms" style="font-weight: bold;">${isPrimary ? (flightData.to || '----') : (flightData.altn || '----')}</span>
             </div>
         </div>
 
-        <!-- Route Summary Table (10 rows) -->
+        <!-- Route Summary Table — PRIMARY/ALTERNATE 모두 13행 고정, ▼▼/▲▲로 페이지 단위 이동 (스크롤 없음) -->
         <table class="rte-summary-table" style="margin-bottom: 4px;">
             <tbody>
-                ${getRteSummaryTableHTML()}
+                ${isPrimary ? getRteSummaryTableHTML() : getAltnRteSummaryTableHTML()}
             </tbody>
         </table>
 
@@ -3158,6 +3467,11 @@ function renderRteSummaryPage() {
             <button class="fms-btn-grey fms-btn-scroll" id="btn-route-scroll-down" style="width: 38px; height: 28px; font-size: 0.65rem; padding: 2px;">▼▼</button>
             <button class="fms-btn-grey fms-btn-scroll" id="btn-route-scroll-up" style="width: 38px; height: 28px; font-size: 0.65rem; padding: 2px;">▲▲</button>
         </div>
+
+        ${isPrimary && atsFplCompareResult ? `
+        <div style="text-align:center; font-size:0.7rem; margin-bottom:2px; color:${atsFplCompareResult.isMatch ? 'var(--text-green)' : 'var(--text-red)'};">
+            ${atsFplCompareResult.isMatch ? 'OFP와 ATS PLAN이 일치합니다' : '⚠ OFP와 ATS PLAN 루트가 다릅니다 — 확인 필요'}
+        </div>` : ''}
 
         <!-- Bottom Actions Row (raised by 3px/3pt using margin/padding tweaks, plus 2pt more) -->
         <div class="fms-row" style="margin-top: auto; padding-top: 5px; margin-bottom: 3px; position: relative; top: -2px;">
@@ -3171,6 +3485,151 @@ function renderRteSummaryPage() {
             </div>
         </div>
     `;
+}
+
+function saveMemoNotepadPages() {
+    localStorage.setItem('ckpt_memo_notepad_pages', JSON.stringify(memoNotepadPages));
+}
+
+function saveMemoDrawpadPages() {
+    try {
+        localStorage.setItem('ckpt_memo_drawpad_pages', JSON.stringify(memoDrawpadPages));
+    } catch (err) {
+        console.error('[MEMO] DRAWPAD 저장 실패 (localStorage 용량 초과 가능):', err);
+    }
+}
+
+function getNotepadHTML() {
+    const text = memoNotepadPages[memoNotepadPageIndex] || '';
+    return `
+        <textarea id="memo-textarea" placeholder="여기에 자유롭게 메모를 입력하세요..." style="
+            flex-grow: 1; width: 100%; resize: none; box-sizing: border-box;
+            background-color: #111419; border: 1.5px solid #2f3542; border-radius: 4px;
+            color: var(--text-green); font-family: 'Share Tech Mono', monospace;
+            font-size: 0.85rem; padding: 8px; line-height: 1.4;
+        ">${text}</textarea>
+    `;
+}
+
+function getDrawpadHTML() {
+    const colors = ['#888888', '#ffffff', '#4fc3f7', '#ff6b6b', '#ffd54f'];
+    return `
+        <div style="display:flex; gap:6px; margin-bottom:6px; align-items:center; flex-wrap:wrap;">
+            ${colors.map(c => `
+                <button class="memo-color-swatch" data-color="${c}" style="
+                    width:22px; height:22px; border-radius:50%; padding:0; cursor:pointer;
+                    background:${c}; border:2px solid ${c === memoDrawColor && !memoIsErasing ? '#fff' : '#2f3542'};
+                "></button>
+            `).join('')}
+            <span style="width:1px; height:20px; background:#2f3542; margin:0 4px;"></span>
+            <button class="fms-btn-grey" id="btn-memo-pen-thin" style="width:30px; height:26px; font-size:0.6rem;">●</button>
+            <button class="fms-btn-grey" id="btn-memo-pen-thick" style="width:30px; height:26px; font-size:0.95rem;">●</button>
+            <button class="fms-btn-grey" id="btn-memo-eraser" style="font-size:0.65rem; padding:4px 8px; ${memoIsErasing ? 'border-color: var(--text-cyan); color: var(--text-cyan);' : ''}">지우개</button>
+            <button class="fms-btn-grey" id="btn-memo-clear" style="font-size:0.65rem; padding:4px 8px;">전체 삭제</button>
+        </div>
+        <div style="flex-grow:1; position:relative; border:1.5px solid #2f3542; border-radius:4px; overflow:hidden; background:#111419;">
+            <canvas id="memo-canvas" style="width:100%; height:100%; touch-action:none; display:block;"></canvas>
+        </div>
+    `;
+}
+
+function initDrawpadHandlers() {
+    const canvas = document.getElementById('memo-canvas');
+    if (!canvas) return;
+    const rect = canvas.parentElement.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    const ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    const saved = memoDrawpadPages[memoDrawpadPageIndex];
+    if (saved) {
+        const img = new Image();
+        img.onload = () => ctx.drawImage(img, 0, 0, rect.width, rect.height);
+        img.src = saved;
+    }
+
+    let drawing = false, lastX = 0, lastY = 0;
+    const getPos = (e) => {
+        const r = canvas.getBoundingClientRect();
+        const cx = (e.touches ? e.touches[0].clientX : e.clientX) - r.left;
+        const cy = (e.touches ? e.touches[0].clientY : e.clientY) - r.top;
+        return { x: cx, y: cy };
+    };
+    const start = (e) => {
+        e.preventDefault();
+        drawing = true;
+        const p = getPos(e);
+        lastX = p.x; lastY = p.y;
+    };
+    const move = (e) => {
+        if (!drawing) return;
+        e.preventDefault();
+        const p = getPos(e);
+        ctx.strokeStyle = memoIsErasing ? '#111419' : memoDrawColor;
+        ctx.lineWidth = memoIsErasing ? memoDrawSize * 4 : memoDrawSize;
+        ctx.beginPath();
+        ctx.moveTo(lastX, lastY);
+        ctx.lineTo(p.x, p.y);
+        ctx.stroke();
+        lastX = p.x; lastY = p.y;
+    };
+    const end = () => {
+        if (!drawing) return;
+        drawing = false;
+        memoDrawpadPages[memoDrawpadPageIndex] = canvas.toDataURL('image/png');
+        saveMemoDrawpadPages();
+    };
+
+    canvas.addEventListener('mousedown', start);
+    canvas.addEventListener('mousemove', move);
+    canvas.addEventListener('mouseup', end);
+    canvas.addEventListener('mouseleave', end);
+    canvas.addEventListener('touchstart', start);
+    canvas.addEventListener('touchmove', move);
+    canvas.addEventListener('touchend', end);
+}
+
+function renderMemoPage() {
+    resetTitleBar();
+    pageTitleText.textContent = 'MEMO';
+    btnInit.classList.remove('active');
+
+    const isNotepad = activeMemoTab === 'NOTEPAD';
+    const pageCount = isNotepad ? memoNotepadPages.length : memoDrawpadPages.length;
+    const pageIndex = isNotepad ? memoNotepadPageIndex : memoDrawpadPageIndex;
+
+    mainContent.innerHTML = `
+        <div class="fms-tabs" style="margin-bottom: 6px;">
+            <div class="fms-tab ${isNotepad ? 'active' : ''}" id="tab-memo-notepad">NOTEPAD</div>
+            <div class="fms-tab ${!isNotepad ? 'active' : ''}" id="tab-memo-drawpad">DRAWPAD</div>
+        </div>
+        ${isNotepad ? getNotepadHTML() : getDrawpadHTML()}
+        <div class="fms-row" style="margin-top: auto; padding-top: 5px; margin-bottom: 3px; justify-content: space-between; align-items: center;">
+            <button class="msg-btn btn-return" id="btn-return" style="height: 28px; width: 55px; font-size: 0.68rem; padding: 2px;">RETURN</button>
+            <div style="display:flex; gap:6px; align-items:center;">
+                <button class="fms-btn-grey" id="btn-memo-page-prev" style="width:34px; height:26px; font-size:0.65rem;">◀</button>
+                <span style="font-size:0.75rem; color:var(--text-white);">${pageIndex + 1}/${pageCount}</span>
+                <button class="fms-btn-grey" id="btn-memo-page-next" style="width:34px; height:26px; font-size:0.65rem;">▶</button>
+                <button class="fms-btn-grey" id="btn-memo-page-new" style="font-size:0.65rem; padding:4px 8px;">+ NEW PAGE</button>
+            </div>
+        </div>
+    `;
+
+    if (isNotepad) {
+        const ta = document.getElementById('memo-textarea');
+        let saveTimer = null;
+        ta.addEventListener('input', () => {
+            memoNotepadPages[memoNotepadPageIndex] = ta.value;
+            clearTimeout(saveTimer);
+            saveTimer = setTimeout(() => saveMemoNotepadPages(), 400);
+        });
+    } else {
+        initDrawpadHandlers();
+    }
 }
 
 function renderFuelLoadPage() {
@@ -3229,7 +3688,7 @@ function renderFuelLoadPage() {
             </div>
         </div>
 
-        <!-- TRIP and MODE -->
+        <!-- TRIP and CGO (Ton) -->
         <div class="fms-row">
             <div class="fms-cell" style="justify-content: space-between;">
                 <div class="cell-left" style="gap: 6px;">
@@ -3242,9 +3701,9 @@ function renderFuelLoadPage() {
                     </div>
                 </div>
                 <div class="cell-right" style="gap: 6px;">
-                    <span class="fms-label label-right" style="width: 80px; text-align: right;">MODE</span>
-                    <div class="fms-val-box white-text" style="width: 90px; justify-content: space-between;">
-                        <span>${flightData.mode}</span><span class="arrow-down">▼</span>
+                    <span class="fms-label label-right" style="width: 80px; text-align: right;">CGO (T)</span>
+                    <div class="fms-val-box extracted-value" style="width: 100px;">
+                        <input type="text" value="${flightData.cargoTons}" data-field="cargoTons">
                     </div>
                 </div>
             </div>
@@ -3478,6 +3937,79 @@ document.body.addEventListener('click', (e) => {
     if (e.target.closest('#btn-init')) {
         renderInitPage();
     }
+
+    // Top nav MEMO button
+    if (e.target.closest('#btn-data')) {
+        renderMemoPage();
+    }
+
+    // MEMO: NOTEPAD/DRAWPAD 탭 전환
+    if (e.target.closest('#tab-memo-notepad')) {
+        activeMemoTab = 'NOTEPAD';
+        renderMemoPage();
+    }
+    if (e.target.closest('#tab-memo-drawpad')) {
+        activeMemoTab = 'DRAWPAD';
+        renderMemoPage();
+    }
+
+    // MEMO: 페이지 이동/추가
+    if (e.target.closest('#btn-memo-page-prev')) {
+        if (activeMemoTab === 'NOTEPAD') {
+            if (memoNotepadPageIndex > 0) memoNotepadPageIndex--;
+        } else if (memoDrawpadPageIndex > 0) {
+            memoDrawpadPageIndex--;
+        }
+        renderMemoPage();
+    }
+    if (e.target.closest('#btn-memo-page-next')) {
+        if (activeMemoTab === 'NOTEPAD') {
+            if (memoNotepadPageIndex < memoNotepadPages.length - 1) memoNotepadPageIndex++;
+        } else if (memoDrawpadPageIndex < memoDrawpadPages.length - 1) {
+            memoDrawpadPageIndex++;
+        }
+        renderMemoPage();
+    }
+    if (e.target.closest('#btn-memo-page-new')) {
+        if (activeMemoTab === 'NOTEPAD') {
+            memoNotepadPages.push('');
+            memoNotepadPageIndex = memoNotepadPages.length - 1;
+            saveMemoNotepadPages();
+        } else {
+            memoDrawpadPages.push(null);
+            memoDrawpadPageIndex = memoDrawpadPages.length - 1;
+            saveMemoDrawpadPages();
+        }
+        renderMemoPage();
+    }
+
+    // MEMO DRAWPAD: 색상/펜/지우개/전체삭제
+    const colorSwatch = e.target.closest('.memo-color-swatch');
+    if (colorSwatch) {
+        memoDrawColor = colorSwatch.dataset.color;
+        memoIsErasing = false;
+        renderMemoPage();
+    }
+    if (e.target.closest('#btn-memo-pen-thin')) {
+        memoDrawSize = 2;
+        memoIsErasing = false;
+    }
+    if (e.target.closest('#btn-memo-pen-thick')) {
+        memoDrawSize = 6;
+        memoIsErasing = false;
+    }
+    if (e.target.closest('#btn-memo-eraser')) {
+        memoIsErasing = true;
+        renderMemoPage();
+    }
+    if (e.target.closest('#btn-memo-clear')) {
+        const canvas = document.getElementById('memo-canvas');
+        if (canvas) {
+            canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+            memoDrawpadPages[memoDrawpadPageIndex] = null;
+            saveMemoDrawpadPages();
+        }
+    }
     
     // FUEL&LOAD trigger from INIT page
     if (e.target.closest('.btn-fuel-load-trigger')) {
@@ -3497,6 +4029,9 @@ document.body.addEventListener('click', (e) => {
         activeDepArrNotamTab = 'DEP';
         activeEnrteNotamTab = 'ALTN';
         activeEnrteWxTab = 'ALTN';
+        activeRteSummaryTab = 'PRIMARY';
+        altnRteScrollIndex = 0;
+        activeMemoTab = 'NOTEPAD';
         depArrNotamScrollIndex = 0;
         enrteNotamScrollIndex = 0;
         renderInitPage();
@@ -3742,20 +4277,47 @@ document.body.addEventListener('click', (e) => {
         renderEnrteWxPage();
     }
 
-    // Scroll down click for Route Summary Table
+    // Toggle PRIMARY/ALTERNATE RTEs tab
+    if (e.target.closest('#tab-rte-primary')) {
+        activeRteSummaryTab = 'PRIMARY';
+        renderRteSummaryPage();
+    }
+    if (e.target.closest('#tab-rte-alternate')) {
+        activeRteSummaryTab = 'ALTERNATE';
+        altnRteScrollIndex = 0;
+        renderRteSummaryPage();
+    }
+
+    // Scroll down click for Route Summary Table — PRIMARY는 1행씩, ALTERNATE는 한 페이지(13행)씩
     if (e.target.closest('#btn-route-scroll-down')) {
-        const maxScroll = Math.max(0, Math.ceil(routeData.length / 2) - 13);
-        if (routeScrollIndex < maxScroll) {
-            routeScrollIndex++;
-            updateRteTableOnly();
+        if (activeRteSummaryTab === 'PRIMARY') {
+            const maxScroll = Math.max(0, Math.ceil(routeData.length / 2) - 13);
+            if (routeScrollIndex < maxScroll) {
+                routeScrollIndex++;
+                updateRteTableOnly();
+            }
+        } else {
+            const totalRows = buildAltnRteRows().length;
+            const maxScroll = Math.max(0, totalRows - 13);
+            if (altnRteScrollIndex < maxScroll) {
+                altnRteScrollIndex = Math.min(altnRteScrollIndex + 13, maxScroll);
+                updateRteTableOnly();
+            }
         }
     }
-    
-    // Scroll up click for Route Summary Table
+
+    // Scroll up click for Route Summary Table — PRIMARY는 1행씩, ALTERNATE는 한 페이지(13행)씩
     if (e.target.closest('#btn-route-scroll-up')) {
-        if (routeScrollIndex > 0) {
-            routeScrollIndex--;
-            updateRteTableOnly();
+        if (activeRteSummaryTab === 'PRIMARY') {
+            if (routeScrollIndex > 0) {
+                routeScrollIndex--;
+                updateRteTableOnly();
+            }
+        } else {
+            if (altnRteScrollIndex > 0) {
+                altnRteScrollIndex = Math.max(0, altnRteScrollIndex - 13);
+                updateRteTableOnly();
+            }
         }
     }
 
@@ -4079,10 +4641,20 @@ if (fileInputEl) {
                 const first = parseInt(paxMatch[1], 10);
                 const business = parseInt(paxMatch[2], 10);
                 const economy = parseInt(paxMatch[3], 10);
-                flightData.paxNbr = String(first + business + economy);
+                flightData.paxBiz = String(first + business); // FIRST는 BUSINESS에 합산 표시
+                flightData.paxEco = String(economy);
+                flightData.paxNbr = `${flightData.paxBiz}/${flightData.paxEco}/${first + business + economy}`;
             } else {
                 flightData.paxNbr = paxMatch[1];
             }
+            matchedCount++;
+        }
+
+        // 11b. CARGO — "CARGO: 7055 LBS" → 톤 변환 (1 ton = 2000 lbs)
+        const cargoMatch = fullText.match(/CARGO\s*:\s*(\d+)\s*LBS/i);
+        if (cargoMatch) {
+            const cargoTons = (parseInt(cargoMatch[1], 10) / 2000).toFixed(1);
+            flightData.cargoTons = cargoTons.padStart(4, '0') + ' T';
             matchedCount++;
         }
 
@@ -4126,6 +4698,20 @@ if (fileInputEl) {
                           fullText.match(/TANKRG\s*[:\-]?\s*(\d{3,5})\b/i);
         if (tankMatch) {
             flightData.tank = parseInt(tankMatch[1], 10).toString();
+            matchedCount++;
+        }
+
+        // 15b. ROUTE FUEL CONSUMPTION STATISTICS — "MEAN/ 2,033 LBS, 95% STAT/ 6,260 LBS, 99% STAT/ 8,011 LBS"
+        // 부호가 본문에 없으면 "TRIP FUEL DIFF (ACTUAL - PLAN)" 기준 양수(+)로 표시
+        const fuelStatMatch = fullText.match(/MEAN\/\s*([+\-]?[\d,]+)\s*LBS,\s*95%\s*STAT\/\s*([+\-]?[\d,]+)\s*LBS,\s*99%\s*STAT\/\s*([+\-]?[\d,]+)\s*LBS/i);
+        if (fuelStatMatch) {
+            const withSign = (s) => {
+                const n = parseInt(s.replace(/,/g, ''), 10);
+                return (n >= 0 ? '+' : '') + n;
+            };
+            flightData.fuelStatMean = withSign(fuelStatMatch[1]);
+            flightData.fuelStat95 = withSign(fuelStatMatch[2]);
+            flightData.fuelStat99 = withSign(fuelStatMatch[3]);
             matchedCount++;
         }
 
@@ -4217,6 +4803,11 @@ if (fileInputEl) {
             }
             if (routeStr) {
                 routeData = parseFlightPlanRoute(routeStr);
+                altnRouteData = extractAltnRoute(fullText);
+                lolvEtpData = extractLolvEtpData(fullText);
+                eraValidationData = extractEraValidationData(fullText);
+                refileFltPlanData = extractRefileFltPlanData(fullText);
+                atsFplCompareResult = extractAtsFplComparisonResult(fullText);
                 const parsedSteps = parseStepAlts(routeStr, flightData.from, fullText);
                 stepAltData.length = 0;
                 parsedSteps.forEach(step => stepAltData.push(step));
