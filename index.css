@@ -305,18 +305,25 @@ body {
 
 /* First Row proportions */
 .row-flt-nbr .flt-nbr-box {
-    width: 80px !important;
+    width: 100px !important;
 }
 .row-flt-nbr .acft-box {
-    width: 75px !important;
+    width: 95px !important;
 }
 .row-flt-nbr .acft-status-btn {
     width: auto !important;
     padding-left: 10px !important;
     padding-right: 10px !important;
 }
-.row-flt-nbr .cpny-request-btn {
-    width: 115px !important;
+/* IMPORT 버튼: 아래 CRZ TEMP 그린 박스와 동일 폭, 오른쪽 끝 정렬 */
+.cpny-request-btn {
+    width: 100px !important;
+}
+/* GATE 버튼: IMPORT(.cpny-request-btn)와 동일 폭, 터미널+게이트 표시 */
+.gate-num-btn {
+    width: 100px !important;
+    font-size: 0.95rem !important;
+    padding: 1px 6px !important;
 }
 
 /* Second Row: FROM/TO/ALTN Airport box sizes */

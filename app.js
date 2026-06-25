@@ -2,6 +2,7 @@
 const flightData = {
     // ACTIVE/INIT Page Values
     fltNbr: '',
+    cfpNbr: '',
     from: '',
     to: '',
     altn: '',
@@ -1482,7 +1483,8 @@ async function fetchGate() {
         const gateEl = document.getElementById('dep-gate-display');
         if (gateEl) {
             gateEl.textContent = buildGateLabel();
-            gateEl.style.color = flightData.depGate ? 'var(--text-cyan)' : '#666';
+            gateEl.style.color = flightData.depGate ? 'var(--text-green)' : '#666';
+            gateEl.style.borderColor = flightData.depGate ? 'var(--text-green)' : '#666';
         }
 
     } catch (err) {
@@ -1490,17 +1492,18 @@ async function fetchGate() {
         flightData.gateStatus = 'error';
         flightData.depGate = 'ERR';
         const gateEl = document.getElementById('dep-gate-display');
-        if (gateEl) { gateEl.textContent = 'GATE ERR'; gateEl.style.color = '#ff6b6b'; }
+        if (gateEl) { gateEl.textContent = 'ERR'; gateEl.style.color = '#ff6b6b'; gateEl.style.borderColor = '#ff6b6b'; }
     }
 }
 
 function buildGateLabel() {
     const g = flightData.depGate;
+    const t = flightData.depTerminal;
     const s = flightData.gateStatus;
     if (s === 'loading') return '...';
     if (!g && s === 'done') return 'N/A';
     if (!g) return '---';
-    return `G${g}`;
+    return t ? `T${t}  G${g}` : `G${g}`;
 }
 
 // ── Rule filtering ───────────────────────────────────────────────
@@ -2063,7 +2066,10 @@ const btnInit = document.getElementById('btn-init');
 function updateHeaderFltNbr() {
     const headerRight = document.querySelector('.header-right');
     if (headerRight) {
-        headerRight.textContent = flightData.fltNbr;
+        // CFP PLAN 번호가 있으면 "편명 / CFP NBR" 형식으로 표시
+        headerRight.textContent = flightData.cfpNbr
+            ? `${flightData.fltNbr} / ${flightData.cfpNbr}`
+            : flightData.fltNbr;
     }
 }
 
@@ -2147,22 +2153,21 @@ function renderInitPage() {
     mainContent.innerHTML = `
         <!-- Row 1: FLT NBR & ACFT STATUS -->
         <div class="fms-row row-flt-nbr">
-            <div class="fms-cell" style="justify-content: space-between;">
-                <div class="cell-left" style="gap: 6px;">
+            <div class="fms-cell" style="justify-content: flex-start; gap: 16px;">
+                <div class="cell-left" style="gap: 8px;">
                     <span class="fms-label">FLT NBR</span>
                     <div class="fms-val-box extracted-value flt-nbr-box">
                         <input type="text" value="${flightData.fltNbr}" id="input-flt-nbr" style="width: 100%;">
                     </div>
                 </div>
-                <div class="cell-left" style="gap: 6px; margin-left: 0px;">
+                <div class="cell-left" style="gap: 10px;">
                     <span class="fms-label" style="width: 32px; margin-right: 0px;">ACFT</span>
                     <div class="fms-val-box extracted-value acft-box">
                         <input type="text" value="${flightData.acftReg}" data-field="acftReg" style="width: 100%;">
                     </div>
                 </div>
-                <div class="cell-right" style="gap: 6px;">
+                <div class="cell-left" style="gap: 6px;">
                     <button class="fms-btn-grey acft-status-btn" style="border-color: var(--text-green); color: var(--text-green);">APMS ${flightData.apms.replace(' %', '')}</button>
-                    <label for="pdf-file-input" class="fms-btn-grey cpny-request-btn" style="border-color: var(--text-cyan); color: var(--text-cyan); font-size: 0.9rem; font-weight: bold; display: flex; justify-content: center; align-items: center; cursor: pointer; box-sizing: border-box;">IMPORT</label>
                 </div>
             </div>
         </div>
@@ -2182,17 +2187,6 @@ function renderInitPage() {
                 <div class="fms-val-box extracted-value altn-airport-box">
                     <input type="text" value="${flightData.altn}" data-field="altn">
                 </div>
-                <span style="display:inline-flex; align-items:center; gap:6px; white-space:nowrap; flex-shrink:0; margin-left:8px;">
-                    <span style="color: var(--text-white); font-weight: 700; font-size: 0.8rem;">GATE</span>
-                    <span id="dep-gate-display"
-                          onclick="fetchGate();"
-                          title="탭하면 게이트 재조회"
-                          style="color:${flightData.depGate ? 'var(--text-cyan)' : '#666'};
-                                 font-family:'Share Tech Mono',monospace; font-size:0.8rem;
-                                 cursor:pointer;">
-                        ${buildGateLabel()}
-                    </span>
-                </span>
             </div>
         </div>
 
@@ -2204,9 +2198,14 @@ function renderInitPage() {
                     <input type="text" value="${flightData.cponyRte}" data-field="cponyRte">
                 </div>
                 <button class="fms-btn-grey route-sel-btn">RTE SEL</button>
+                <span style="color: var(--text-white); font-weight: 700; font-size: 0.8rem; margin-left: 8px;">GATE</span>
+                <button id="dep-gate-display" class="fms-btn-grey gate-num-btn"
+                        onclick="fetchGate();" title="탭하면 게이트 재조회"
+                        style="border-color: var(--text-green); color: var(--text-green);
+                               font-family:'Share Tech Mono',monospace;">${buildGateLabel()}</button>
             </div>
         </div>
-        
+
         <!-- Row 4: ALTN RTE -->
         <div class="fms-row">
             <div class="fms-cell" style="justify-content: flex-start; gap: 10px;">
@@ -2215,6 +2214,8 @@ function renderInitPage() {
                     <input type="text" value="${flightData.altnRte}" data-field="altnRte">
                 </div>
                 <button class="fms-btn-grey route-sel-btn" style="color: #cbd5e0;">ALTN RTE SEL</button>
+                <span style="color: var(--text-white); font-weight: 700; font-size: 0.8rem; margin-left: auto;">CFP</span>
+                <label for="pdf-file-input" class="fms-btn-grey cpny-request-btn" style="border-color: var(--text-cyan); color: var(--text-cyan); font-size: 0.9rem; font-weight: bold; display: flex; justify-content: center; align-items: center; cursor: pointer; box-sizing: border-box;">IMPORT</label>
             </div>
         </div>
 
@@ -2362,6 +2363,7 @@ function buildAltnRteRows() {
         rows.push({ type: 'route-pair', pair1, pair2 });
     }
     if (lolvEtpData.length) {
+        rows.push({ type: 'spacer-2' });
         rows.push({ type: 'spacer-2' });
         rows.push({ type: 'header', text: 'LOLV EQUAL TIME POINT DATA' });
         lolvEtpData.forEach(p => rows.push({ type: 'lolv', data: p }));
@@ -3093,8 +3095,12 @@ function highlightNotamKeywords(text) {
             '<span style="color:#f0c040;font-weight:bold;">$1</span>');
 }
 
-function renderNotamRows(lines, scrollIndex) {
-    const ROWS = 13;
+// DEP/ARR NOTAM은 ETD/ETA 행이 추가로 있어 다른 NOTAM 페이지보다 높이가 큼.
+// 테이블 행 수를 줄여 전체 높이를 맞추면 RETURN이 margin-top:auto로 동일 위치에 정렬됨.
+const DEP_ARR_NOTAM_ROWS = 11;
+
+function renderNotamRows(lines, scrollIndex, rowCount = 13) {
+    const ROWS = rowCount;
     let html = '';
     for (let i = 0; i < ROWS; i++) {
         const item = lines[scrollIndex + i];
@@ -3157,7 +3163,7 @@ function getDepArrNotamTableHTML() {
             lines = [];
         }
     }
-    return renderNotamRows(lines, depArrNotamScrollIndex);
+    return renderNotamRows(lines, depArrNotamScrollIndex, DEP_ARR_NOTAM_ROWS);
 }
 
 function renderEnrteNotamPage() {
@@ -4250,14 +4256,14 @@ document.body.addEventListener('click', (e) => {
                 ? buildNotamDisplayLines(flightData.arrNotamEntries, flightData.to || 'KJFK', flightData.arrRunwayInfo)
                 : [];
         }
-        const max = Math.max(0, countLines.length - 13);
-        depArrNotamScrollIndex = Math.min(depArrNotamScrollIndex + 13, max);
+        const max = Math.max(0, countLines.length - DEP_ARR_NOTAM_ROWS);
+        depArrNotamScrollIndex = Math.min(depArrNotamScrollIndex + DEP_ARR_NOTAM_ROWS, max);
         const tbody = document.querySelector('#dep-arr-notam-table-body');
         if (tbody) tbody.innerHTML = getDepArrNotamTableHTML();
     }
     if (e.target.closest('#btn-dep-notam-scroll-up')) {
         if (depArrNotamScrollIndex > 0) {
-            depArrNotamScrollIndex = Math.max(0, depArrNotamScrollIndex - 13);
+            depArrNotamScrollIndex = Math.max(0, depArrNotamScrollIndex - DEP_ARR_NOTAM_ROWS);
             const tbody = document.querySelector('#dep-arr-notam-table-body');
             if (tbody) tbody.innerHTML = getDepArrNotamTableHTML();
         }
@@ -4541,6 +4547,10 @@ if (fileInputEl) {
         const fltMatch = fullText.match(/FLIGHT\s+RELEASE\s+([A-Z]{2,3}\d{1,4}[A-Z]?)/i) ||
                          fullText.match(/(?:FLT|FLIGHT)\s*(?:NBR|NO|NUMBER)?\s*[:\-#]?\s*([A-Z]{2,3}\d{1,4})/i);
         if (fltMatch) { flightData.fltNbr = fltMatch[1].toUpperCase(); matchedCount++; }
+
+        // 1b. CFP PLAN NBR — "CFP PLAN 6670"
+        const cfpMatch = fullText.match(/CFP\s+PLAN\s+(\d{3,6})/i);
+        if (cfpMatch) { flightData.cfpNbr = cfpMatch[1]; matchedCount++; }
 
         // 2. FROM/TO — "KLAX/RKSI ON 08/JUN/26"
         const routeMatch = fullText.match(/\b([A-Z]{4})\/([A-Z]{4})\s+ON\b/i) ||
