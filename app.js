@@ -2215,7 +2215,7 @@ function renderInitPage() {
                 </div>
                 <button class="fms-btn-grey route-sel-btn" style="color: #cbd5e0;">ALTN RTE SEL</button>
                 <span style="color: var(--text-white); font-weight: 700; font-size: 0.8rem; margin-left: auto;">CFP</span>
-                <label for="pdf-file-input" class="fms-btn-grey cpny-request-btn" style="border-color: var(--text-cyan); color: var(--text-cyan); font-size: 0.9rem; font-weight: bold; display: flex; justify-content: center; align-items: center; cursor: pointer; box-sizing: border-box;">IMPORT</label>
+                <label for="pdf-file-input" class="fms-btn-grey cpny-request-btn" style="border-color: var(--text-cyan); border-width: 4px; color: var(--text-cyan); font-size: 0.9rem; font-weight: bold; display: flex; justify-content: center; align-items: center; cursor: pointer; box-sizing: border-box;">IMPORT</label>
             </div>
         </div>
 
@@ -2789,7 +2789,7 @@ function getDepArrWxTableHTML() {
 
     // ── TAF (OFP 원문) ────────────────────────────────────────────
     const tafData = parseTafLines(rawLines, targetDay, targetTime);
-    for (let i = 0; i < 10; i++) {   // METAR 행 추가로 TAF는 10행으로 축소
+    for (let i = 0; i < 8; i++) {   // METAR 행 + 긴 TAF 줄바꿈 고려해 8행으로 축소(RETURN 잘림 방지)
         const item = tafData[i];
         if (!item) {
             html += `<tr style="height: 24px;"><td style="padding: 2px 4px;"></td></tr>`;
