@@ -737,12 +737,22 @@ function extractAtsFplComparisonResult(fullText) {
 }
 
 function extractAltnRoute(fullText) {
-    // "ROUTE TO ALTN : KJFK..DIXIE..JIIMS4 KPHL" → ".." 는 DCT를 의미, DEST 공항은 제외하고 표시
+    // "ROUTE TO ALTN : KLAX..LAX J96 PDZ..KONT"
+    //   ".." = DCT(직항), 공백으로 구분된 토큰 = AIRWAY(예: J96).
+    //   DEST(첫 공항)는 제외하고, PRIMARY RTEs와 동일하게 [AIRWAY, WAYPOINT] 쌍으로 묶어 표시.
     const m = fullText.match(/ROUTE TO ALTN\s*:\s*(.+)/i);
     if (!m) return [];
-    const tokens = m[1].trim().replace(/\.\./g, ' ').split(/\s+/).filter(Boolean);
-    tokens.shift(); // 첫 토큰(DEST 공항) 제외
-    return tokens.map(wpt => ({ airway: 'DCT', waypoint: wpt }));
+    // ".." → " DCT " 치환 후 공백 토큰화 → DEST 제외
+    const tokens = m[1].trim().replace(/\.\./g, ' DCT ').split(/\s+/).filter(Boolean);
+    tokens.shift();
+    // 토큰은 (AIRWAY, WAYPOINT) 순으로 교대 → 2개씩 쌍으로 묶음
+    const pairs = [];
+    for (let i = 0; i < tokens.length; i += 2) {
+        const airway = tokens[i] || '';
+        const waypoint = tokens[i + 1] || '';
+        if (waypoint) pairs.push({ airway, waypoint });
+    }
+    return pairs;
 }
 
 function formatLatLonDecimal(coord) {
