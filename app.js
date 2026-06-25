@@ -1496,12 +1496,11 @@ async function fetchGate() {
 
 function buildGateLabel() {
     const g = flightData.depGate;
-    const t = flightData.depTerminal;
     const s = flightData.gateStatus;
     if (s === 'loading') return '...';
     if (!g && s === 'done') return 'N/A';
     if (!g) return '---';
-    return t ? `T${t} G${g}` : `GATE ${g}`;
+    return `G${g}`;
 }
 
 // ── Rule filtering ───────────────────────────────────────────────
