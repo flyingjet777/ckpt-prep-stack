@@ -23,8 +23,6 @@ const flightData = {
     zfwcg: '',
     taxi: '',
     paxNbr: '',
-    paxBiz: '',
-    paxEco: '',
     cargoTons: '',
     trip: '',  
     tripTime: '',
@@ -4510,7 +4508,6 @@ if (fileInputEl) {
             setProgress(Math.round(40 + (i / numPages) * 45));
         }
 
-        console.log('Parsed PDF Text:', fullText);
         setProgress(90);
 
         // --- Extract values: patterns match the Asiana CFP (OFP page 1) format. ---
@@ -4638,12 +4635,10 @@ if (fileInputEl) {
                          fullText.match(/PAX\s*\/?[#]?\s*(\d{1,3})\b/i);
         if (paxMatch) {
             if (paxMatch[0].toUpperCase().includes('PASSENGERS')) {
-                const first = parseInt(paxMatch[1], 10);
-                const business = parseInt(paxMatch[2], 10);
+                const business = parseInt(paxMatch[1], 10) + parseInt(paxMatch[2], 10); // FIRST는 BUSINESS에 합산
                 const economy = parseInt(paxMatch[3], 10);
-                flightData.paxBiz = String(first + business); // FIRST는 BUSINESS에 합산 표시
-                flightData.paxEco = String(economy);
-                flightData.paxNbr = `${flightData.paxBiz}/${flightData.paxEco}/${first + business + economy}`;
+                // 표시 형식: 비즈니스/이코노미/총원
+                flightData.paxNbr = `${business}/${economy}/${business + economy}`;
             } else {
                 flightData.paxNbr = paxMatch[1];
             }
