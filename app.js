@@ -2402,7 +2402,7 @@ function getAltnRteRowHTML(row) {
                 <tr>
                     <td class="text-white-fms" style="width: 22%; font-size:0.75rem;">${row.data.from}-${row.data.to}</td>
                     <td class="text-green-fms" colspan="3" style="font-size:0.75rem; font-family:'Share Tech Mono',monospace;">
-                        ETP LAT/LONG ${row.data.lat} ${row.data.lon}
+                        ETP LAT/LONG&nbsp;&nbsp;&nbsp;${row.data.lat} ${row.data.lon}
                     </td>
                 </tr>
             `;
