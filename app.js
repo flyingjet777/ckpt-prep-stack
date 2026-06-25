@@ -3500,6 +3500,9 @@ function saveMemoDrawpadPages() {
 function getNotepadHTML() {
     const text = memoNotepadPages[memoNotepadPageIndex] || '';
     return `
+        <div style="display:flex; justify-content:flex-end; margin-bottom:6px;">
+            <button class="fms-btn-grey" id="btn-memo-notepad-clear" style="font-size:0.65rem; padding:4px 8px;">전체 삭제</button>
+        </div>
         <textarea id="memo-textarea" placeholder="여기에 자유롭게 메모를 입력하세요..." style="
             flex-grow: 1; width: 100%; resize: none; box-sizing: border-box;
             background-color: #111419; border: 1.5px solid #2f3542; border-radius: 4px;
@@ -4007,6 +4010,14 @@ document.body.addEventListener('click', (e) => {
             memoDrawpadPages[memoDrawpadPageIndex] = null;
             saveMemoDrawpadPages();
         }
+    }
+
+    // MEMO NOTEPAD: 현재 페이지 전체 삭제
+    if (e.target.closest('#btn-memo-notepad-clear')) {
+        memoNotepadPages[memoNotepadPageIndex] = '';
+        saveMemoNotepadPages();
+        const ta = document.getElementById('memo-textarea');
+        if (ta) ta.value = '';
     }
     
     // FUEL&LOAD trigger from INIT page
