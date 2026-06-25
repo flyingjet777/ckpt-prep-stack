@@ -2182,14 +2182,16 @@ function renderInitPage() {
                 <div class="fms-val-box extracted-value altn-airport-box">
                     <input type="text" value="${flightData.altn}" data-field="altn">
                 </div>
-                <span style="color: var(--text-white); font-weight: 700; font-size: 0.8rem; margin: 0 4px 0 8px;">GATE</span>
-                <span id="dep-gate-display"
-                      onclick="fetchGate();"
-                      title="탭하면 게이트 재조회"
-                      style="color:${flightData.depGate ? 'var(--text-cyan)' : '#666'};
-                             font-family:'Share Tech Mono',monospace; font-size:0.8rem;
-                             cursor:pointer; min-width:60px;">
-                    ${buildGateLabel()}
+                <span style="display:inline-flex; align-items:center; gap:6px; white-space:nowrap; flex-shrink:0; margin-left:8px;">
+                    <span style="color: var(--text-white); font-weight: 700; font-size: 0.8rem;">GATE</span>
+                    <span id="dep-gate-display"
+                          onclick="fetchGate();"
+                          title="탭하면 게이트 재조회"
+                          style="color:${flightData.depGate ? 'var(--text-cyan)' : '#666'};
+                                 font-family:'Share Tech Mono',monospace; font-size:0.8rem;
+                                 cursor:pointer;">
+                        ${buildGateLabel()}
+                    </span>
                 </span>
             </div>
         </div>
