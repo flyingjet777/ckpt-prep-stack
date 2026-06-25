@@ -1469,11 +1469,9 @@ function notamPassesRules(entry, airport, flightData) {
 
     // Rule 8 (RCTP): only show NOTAMs for gates C1-C6, D1-D6
     if (airport === 'RCTP') {
-        const gateMatch = desc.match(/\b(?:GATE|STAND|SPOT|BAY|REMOTE)\s+(?:NR\s+)?([CD]\d)\b/);
+        const gateMatch = desc.match(/\b(?:GATE|STAND|SPOT|BAY|REMOTE)\s+(?:NR\s+)?([CD]\d{1,2})\b/);
         if (gateMatch) {
-            const gate = gateMatch[1];
-            const num = parseInt(gate.slice(1), 10);
-            if (!['C', 'D'].includes(gate[0]) || num < 1 || num > 6) return false;
+            if (!/^[CD][1-6]$/.test(gateMatch[1])) return false;
         }
     }
 
