@@ -3692,7 +3692,7 @@ function renderFuelLoadPage() {
                 </div>
                 <div class="cell-right" style="gap: 6px;">
                     <span class="fms-label label-right" style="width: 80px; text-align: right;">PAX NBR</span>
-                    <div class="fms-val-box extracted-value" style="width: 100px;">
+                    <div class="fms-val-box extracted-value" style="width: 104px;">
                         <input type="text" value="${flightData.paxNbr}" data-field="paxNbr">
                     </div>
                 </div>
@@ -3713,7 +3713,7 @@ function renderFuelLoadPage() {
                 </div>
                 <div class="cell-right" style="gap: 6px;">
                     <span class="fms-label label-right" style="width: 80px; text-align: right;">CGO (T)</span>
-                    <div class="fms-val-box extracted-value" style="width: 100px;">
+                    <div class="fms-val-box extracted-value" style="width: 104px;">
                         <input type="text" value="${flightData.cargoTons}" data-field="cargoTons">
                     </div>
                 </div>
@@ -3734,7 +3734,7 @@ function renderFuelLoadPage() {
                 </div>
                 <div class="cell-right" style="gap: 6px;">
                     <span class="fms-label label-right" style="width: 80px; text-align: right;">CI</span>
-                    <div class="fms-val-box extracted-value" style="width: 100px;">
+                    <div class="fms-val-box extracted-value" style="width: 104px;">
                         <input type="text" value="${flightData.ci}" data-field="ci">
                     </div>
                 </div>
