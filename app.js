@@ -4953,21 +4953,32 @@ function adjustBezelScale() {
     document.body.style.setProperty('--scale', scale);
 }
 
+// iOS PWA는 백그라운드 복귀 직후 innerWidth/Height가 안정화 전이라 1회 계산 시
+// 화면이 작게 잡히는 고질 버그가 있음 → 즉시 + 지연 여러 번 재계산해 보정.
+function scheduleBezelScale() {
+    adjustBezelScale();
+    setTimeout(adjustBezelScale, 100);
+    setTimeout(adjustBezelScale, 300);
+    setTimeout(adjustBezelScale, 600);
+}
+
 // Attach listeners for scaling and panels
 window.addEventListener('resize', adjustBezelScale);
-window.addEventListener('pageshow', adjustBezelScale);
+window.addEventListener('orientationchange', scheduleBezelScale);
+window.addEventListener('pageshow', scheduleBezelScale);
 document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
-        adjustBezelScale();
+        scheduleBezelScale();
     }
 });
+// 키보드 노출/축소 등 visual viewport 변화에도 대응 (iOS)
+if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', adjustBezelScale);
+}
 window.addEventListener('DOMContentLoaded', () => {
-    adjustBezelScale();
+    scheduleBezelScale();
     updateDebugPanel();
 });
-adjustBezelScale();
+scheduleBezelScale();
 updateDebugPanel();
-// Run a small delay to handle iPad Safari layout quirks on load
-setTimeout(adjustBezelScale, 100);
-setTimeout(adjustBezelScale, 500);
 setTimeout(adjustBezelScale, 1500);

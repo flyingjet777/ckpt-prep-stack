@@ -187,8 +187,11 @@ body {
     display: flex;
     flex-direction: column;
     justify-content: flex-start;
-    gap: 4px; 
+    gap: 4px;
     height: calc(100% - 64px);
+    /* flex item이 내용 크기만큼 늘어나 푸터(MSG LIST)를 밀어내지 않도록 고정 */
+    min-height: 0;
+    overflow: hidden;
 }
 
 /* Row structure */
