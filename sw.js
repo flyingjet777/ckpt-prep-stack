@@ -1,4 +1,4 @@
-const CACHE_NAME = 'a380-mfd-v1';
+const CACHE_NAME = 'a380-mfd-v3';
 const ASSETS = [
   './index.html',
   './index.css',
