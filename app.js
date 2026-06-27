@@ -2584,7 +2584,7 @@ function renderMelCdlPage() {
                     <div class="cell-left" style="gap: 10px; align-items: center;">
                         <span class="fms-label" style="width: auto; margin-right: 0;">ACFT IDENT</span>
                         <div class="fms-val-box cyan-text" style="width: 140px; justify-content: space-between;">
-                            <span>HL7640</span><span class="arrow-down">▼</span>
+                            <span>${flightData.acftReg || 'HL----'}</span><span class="arrow-down">▼</span>
                         </div>
                     </div>
                     <div class="cell-right" style="gap: 12px; align-items: center;">
