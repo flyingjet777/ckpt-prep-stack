@@ -585,6 +585,17 @@ body {
     vertical-align: middle;
 }
 
+/* MEL/CDL 테이블: 항목 수/설명 길이와 무관하게 항상 13행 고정 높이 유지 (RETURN 버튼 밀림 방지) */
+.mel-cdl-table {
+    table-layout: fixed;
+    height: 312px;
+}
+.mel-cdl-table td {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
 /* PDF Debug Comparison Panel */
 .pdf-debug-panel {
     width: 330px;
