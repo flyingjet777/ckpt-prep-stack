@@ -3551,10 +3551,14 @@ function getDrawpadHTML() {
     `;
 }
 
-function initDrawpadHandlers() {
+// 화면 회전/리사이즈로 --scale이 바뀌면 캔버스 내부 비트맵 크기와
+// 화면상 표시 크기가 어긋나 펜 위치와 드로잉 위치가 달라짐 → 매번 재동기화
+function syncMemoCanvasSize() {
+    if (activeMemoTab !== 'DRAWPAD') return;
     const canvas = document.getElementById('memo-canvas');
     if (!canvas) return;
     const rect = canvas.parentElement.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return;
     const dpr = window.devicePixelRatio || 1;
     canvas.width = rect.width * dpr;
     canvas.height = rect.height * dpr;
@@ -3569,6 +3573,13 @@ function initDrawpadHandlers() {
         img.onload = () => ctx.drawImage(img, 0, 0, rect.width, rect.height);
         img.src = saved;
     }
+}
+
+function initDrawpadHandlers() {
+    const canvas = document.getElementById('memo-canvas');
+    if (!canvas) return;
+    syncMemoCanvasSize();
+    const ctx = canvas.getContext('2d');
 
     let drawing = false, lastX = 0, lastY = 0;
     const getPos = (e) => {
@@ -4962,6 +4973,7 @@ function adjustBezelScale() {
     }
     
     document.body.style.setProperty('--scale', scale);
+    syncMemoCanvasSize();
 }
 
 // iOS PWA는 백그라운드 복귀 직후 innerWidth/Height가 안정화 전이라 1회 계산 시
