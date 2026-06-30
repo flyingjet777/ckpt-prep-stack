@@ -3669,29 +3669,35 @@ function renderFuelLoadPage() {
     mainContent.innerHTML = `
         <!-- Row 1: ZFW and ZFWCG -->
         <div class="fms-row fms-row-condensed">
-            <div class="fms-cell" style="justify-content: space-between;">
+            <div class="fms-cell" style="justify-content: space-between; padding-left: 35px; padding-right: 75px;">
                 <div class="cell-left" style="gap: 6px;">
                     <span class="fms-label">ZFW</span>
-                    <div class="fms-val-box extracted-value" style="width: 130px;">
+                    <div class="fms-val-box extracted-value" style="width: 120px;">
                         <input type="text" value="${flightData.zfw}" data-field="zfw">
                     </div>
                 </div>
                 <div class="cell-right" style="gap: 6px;">
                     <span class="fms-label label-right" style="width: 80px; text-align: right;">ZFWCG</span>
-                    <div class="fms-val-box white-text" style="width: 100px;">
+                    <div class="fms-val-box white-text" style="width: 120px;">
                         <input type="text" value="${flightData.zfwcg}" data-field="zfwcg">
                     </div>
                 </div>
             </div>
         </div>
 
-        <!-- Row 2: FOB Box below ZFW -->
+        <!-- Row 2: FOB and TOW -->
         <div class="fms-row fms-row-condensed">
-            <div class="fms-cell" style="justify-content: space-between;">
+            <div class="fms-cell" style="justify-content: space-between; padding-left: 35px; padding-right: 75px;">
                 <div class="cell-left" style="gap: 6px;">
                     <span class="fms-label">FOB</span>
-                    <div class="fms-val-box extracted-value" style="width: 130px;">
+                    <div class="fms-val-box extracted-value" style="width: 120px;">
                         <input type="text" value="${flightData.fob}" data-field="fob">
+                    </div>
+                </div>
+                <div class="cell-right" style="gap: 6px;">
+                    <span class="fms-label label-right" style="width: 80px; text-align: right;">TOW</span>
+                    <div class="fms-val-box extracted-value" id="tow-display-val" style="width: 120px;">
+                        ${flightData.tow}
                     </div>
                 </div>
             </div>
@@ -3759,7 +3765,7 @@ function renderFuelLoadPage() {
             </div>
         </div>
 
-        <!-- ALTN and TOW -->
+        <!-- ALTN -->
         <div class="fms-row">
             <div class="fms-cell" style="justify-content: space-between;">
                 <div class="cell-left" style="gap: 6px;">
@@ -3769,12 +3775,6 @@ function renderFuelLoadPage() {
                     </div>
                     <div class="fms-val-box extracted-value" style="width: 80px;">
                         <input type="text" value="${flightData.altnTime}" data-field="altnTime">
-                    </div>
-                </div>
-                <div class="cell-right" style="gap: 6px;">
-                    <span class="fms-label label-right" style="width: 80px; text-align: right;">TOW</span>
-                    <div id="tow-display-val" style="width: 100px; text-align: center; color: var(--text-green); font-weight: bold; font-size: 0.95rem;">
-                        ${flightData.tow}
                     </div>
                 </div>
             </div>
@@ -3832,39 +3832,39 @@ function renderStepAltsPage() {
     let zonesHTML = '';
     if (zones.length > 0) {
         zonesHTML = zones.map(z => `
-            <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
-                <div style="color: #ffffff;">
+            <div style="display: grid; grid-template-columns: 165px 68px 1fr; align-items: center; width: 100%;">
+                <div style="color: #ffffff; text-align: left;">
                     AT <span style="color: ${z.color};">${z.label}</span>
                 </div>
-                <div style="color: #ffffff;">
+                <div style="color: #ffffff; text-align: left;">
                     SR <span style="color: ${z.color};">${z.sr}</span>
                 </div>
-                <div style="color: #ffffff; margin-right: 5px;">
+                <div style="color: #ffffff; text-align: left;">
                     TIME AFTER DEP <span style="color: ${z.color};">${z.time}</span>
                 </div>
             </div>
         `).join('');
     } else {
         zonesHTML = `
-            <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
-                <div style="color: #ffffff;">
+            <div style="display: grid; grid-template-columns: 165px 68px 1fr; align-items: center; width: 100%;">
+                <div style="color: #ffffff; text-align: left;">
                     AT <span style="color: var(--text-green);">ETP2 / ASTER</span>
                 </div>
-                <div style="color: #ffffff;">
+                <div style="color: #ffffff; text-align: left;">
                     SR <span style="color: var(--text-green);">04-05</span>
                 </div>
-                <div style="color: #ffffff; margin-right: 5px;">
+                <div style="color: #ffffff; text-align: left;">
                     TIME AFTER DEP <span style="color: var(--text-green);">07+59 / 10+28</span>
                 </div>
             </div>
-            <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
-                <div style="color: #ffffff;">
+            <div style="display: grid; grid-template-columns: 165px 68px 1fr; align-items: center; width: 100%;">
+                <div style="color: #ffffff; text-align: left;">
                     AT <span style="color: var(--text-red);">SDE / GTC</span>
                 </div>
-                <div style="color: #ffffff;">
+                <div style="color: #ffffff; text-align: left;">
                     SR <span style="color: var(--text-red);">08</span>
                 </div>
-                <div style="color: #ffffff; margin-right: 5px;">
+                <div style="color: #ffffff; text-align: left;">
                     TIME AFTER DEP <span style="color: var(--text-red);">10+44 / 10+58</span>
                 </div>
             </div>
