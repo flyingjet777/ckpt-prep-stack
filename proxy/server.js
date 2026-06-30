@@ -70,6 +70,79 @@ app.post('/notam-summary', async (req, res) => {
     }
 });
 
+// ATIS — 미국은 공식 atis.info(구 datis.clowd.io, FAA SWIM), 그 외는 atis.guru(ACARS 수집, 비공식)로 폴백
+function decodeAtisText(s) {
+    return s
+        .replace(/&#x([0-9A-Fa-f]+);/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .trim();
+}
+
+async function fetchFaaAtis(icao) {
+    const r = await fetch(`https://atis.info/api/${encodeURIComponent(icao)}`, {
+        headers: { 'User-Agent': 'Mozilla/5.0' }
+    });
+    if (!r.ok) return null;
+    const data = await r.json();
+    if (!Array.isArray(data) || data.length === 0) return null;
+    return data.map(d => ({
+        type: (d.type || 'combined').toUpperCase(),
+        code: d.code || '',
+        text: d.datis || '',
+        time: d.time || '',
+        updatedAt: d.updatedAt || ''
+    }));
+}
+
+async function fetchGuruAtis(icao) {
+    const r = await fetch(`https://atis.guru/atis/${encodeURIComponent(icao)}`, {
+        headers: { 'User-Agent': 'Mozilla/5.0' }
+    });
+    if (!r.ok) return null;
+    const html = await r.text();
+    // atis.guru는 Blazor SSR이라 본문 HTML에 "<h5 class=card-title>구분</h5> ... <div class=atis>본문</div>" 카드가 그대로 박혀 나옴
+    const cardRe = /<h5 class="card-title"[^>]*>\s*([^<]+?)\s*<\/h5>(?:\s*<h6[^>]*>([^<]*)<\/h6>)?[\s\S]*?<div class="atis">([\s\S]*?)<\/div>/g;
+    const results = [];
+    let m;
+    while ((m = cardRe.exec(html)) !== null) {
+        const title = m[1].trim();
+        if (!/ATIS/i.test(title)) continue; // METAR/TAF 카드는 건너뜀 — 공식 METAR는 /metar에서 별도 제공
+        results.push({
+            type: /arrival/i.test(title) ? 'ARR' : /departure/i.test(title) ? 'DEP' : 'COMBINED',
+            code: '',
+            text: decodeAtisText(m[3]),
+            time: (m[2] || '').trim(),
+            updatedAt: ''
+        });
+    }
+    return results.length ? results : null;
+}
+
+app.get('/atis', async (req, res) => {
+    const icao = (req.query.icao || '').trim().toUpperCase();
+    if (!icao) return res.status(400).json({ error: 'icao required' });
+    try {
+        const faa = await fetchFaaAtis(icao);
+        if (faa) return res.json({ icao, source: 'faa', atis: faa });
+
+        const guru = await fetchGuruAtis(icao);
+        if (guru) {
+            return res.json({
+                icao, source: 'guru', atis: guru,
+                disclaimer: '비공식 데이터(ACARS 수집, atis.guru) — 운항 참고용으로만 사용. 최신 요청이 없으면 갱신 안 됨.'
+            });
+        }
+
+        return res.json({ icao, source: null, atis: [] });
+    } catch (err) {
+        res.status(502).json({ error: String(err) });
+    }
+});
+
 app.get('/health', (req, res) => res.json({ ok: true }));
 
 const PORT = process.env.PORT || 8765;

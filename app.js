@@ -1363,6 +1363,43 @@ async function fetchMetar() {
     }
 }
 
+// ══════════════════════════════════════════════════════════════════
+//  D-ATIS  —  미국은 공식 atis.info(FAA SWIM), 그 외는 atis.guru(ACARS 수집, 비공식) 폴백
+// ══════════════════════════════════════════════════════════════════
+
+const ATIS_CACHE_MS = 10 * 60 * 1000; // 10분
+
+async function fetchOneAtis(icao) {
+    if (!icao) return null;
+    try {
+        const resp = await fetch(`${CKPT_PROXY_BASE}/atis?icao=${encodeURIComponent(icao)}`);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        return await resp.json();
+    } catch (err) {
+        console.error(`[ATIS] ${icao} fetch 실패:`, err);
+        return null;
+    }
+}
+
+async function fetchAtis() {
+    const dep = (flightData.from || '').trim();
+    const arr = (flightData.to  || '').trim();
+    if (!dep || !arr) return;
+
+    const now = Date.now();
+    if (flightData.atisCacheTime && (now - flightData.atisCacheTime) < ATIS_CACHE_MS) {
+        console.log('[ATIS] Cache hit — skipping fetch');
+        return;
+    }
+
+    console.log(`[ATIS] Fetching for ${dep}, ${arr}`);
+    const [depAtis, arrAtis] = await Promise.all([fetchOneAtis(dep), fetchOneAtis(arr)]);
+    flightData.depAtis = depAtis;
+    flightData.arrAtis = arrAtis;
+    flightData.atisCacheTime = now;
+    console.log('[ATIS] Done —', dep, depAtis?.source, arr, arrAtis?.source);
+}
+
 function getMetarCategoryColor(cat) {
     switch ((cat || '').toUpperCase()) {
         case 'VFR':  return '#00e676';   // 초록
@@ -1930,7 +1967,8 @@ let melCdlData = [];
 
 // --- Weather Data ---
 let depArrWxScrollIndex = 0;
-let activeDepArrWxTab = 'DEP'; // 'DEP' or 'ARR'
+let activeDepArrWxTab = 'DEP'; // 'DEP', 'ARR', or 'ATIS'
+let atisScrollIndex = 0;
 
 // --- NOTAM Page Data ---
 let depArrNotamScrollIndex = 0;
@@ -2806,6 +2844,68 @@ function getDepArrWxTableHTML() {
     return html;
 }
 
+// ── ATIS 탭: DEP/ARR 공항 D-ATIS를 한 화면에 합쳐서 13행 페이지네이션으로 표시 ──
+function buildAtisLines() {
+    const lines = [];
+    const sections = [
+        { label: flightData.from || 'DEP', data: flightData.depAtis },
+        { label: flightData.to   || 'ARR', data: flightData.arrAtis },
+    ];
+
+    for (const sec of sections) {
+        if (!sec.data || !sec.data.atis || sec.data.atis.length === 0) {
+            lines.push({ text: `${sec.label} ATIS — 데이터 없음`, color: '#666' });
+            lines.push({ isBlank: true });
+            continue;
+        }
+        const sourceTag = sec.data.source === 'faa' ? '(FAA 공식)' : '(비공식·ACARS 수집)';
+        lines.push({ text: `${sec.label} D-ATIS ${sourceTag}`, color: '#4fc3f7', bold: true });
+        for (const item of sec.data.atis) {
+            lines.push({ text: `[${item.type}${item.code ? ' ' + item.code : ''}]${item.time ? ' ' + item.time : ''}`, color: '#fff' });
+            const chunks = [];
+            const raw = (item.text || '').split('\n').join(' ').replace(/\s+/g, ' ').trim();
+            for (let i = 0; i < raw.length; i += 70) chunks.push(raw.slice(i, i + 70));
+            for (const c of chunks) lines.push({ text: c, color: '#fff' });
+        }
+        lines.push({ isBlank: true });
+    }
+    return lines;
+}
+
+function getAtisWarningBannerHTML() {
+    const hasUnofficial = [flightData.depAtis, flightData.arrAtis].some(d => d && d.source && d.source !== 'faa');
+    if (!hasUnofficial) return '';
+    return `<div style="text-align:center; font-size:0.7rem; font-weight:bold; color:var(--text-red); margin-bottom:4px;">
+        &lt;중요&gt; 비공식 D-ATIS 포함 — 참고용으로만 사용 요망
+    </div>`;
+}
+
+function getAtisTableHTML() {
+    let html = '';
+    const lines = buildAtisLines();
+
+    for (let i = 0; i < 13; i++) {
+        const item = lines[atisScrollIndex + i];
+        if (!item) {
+            html += `<tr style="height: 24px;"><td style="padding: 2px 4px;"></td></tr>`;
+            continue;
+        }
+        if (item.isBlank) {
+            html += `<tr style="height: 12px;"><td>&nbsp;</td></tr>`;
+            continue;
+        }
+        html += `
+            <tr style="height: auto;">
+                <td style="font-size: 0.72rem; line-height: 1.35; padding: 2px 6px;
+                           font-family: 'Share Tech Mono', monospace; word-break: break-all; text-align: left;
+                           color: ${item.color || '#fff'}; font-weight: ${item.bold ? 'bold' : 'normal'};">
+                    ${item.text}
+                </td>
+            </tr>`;
+    }
+    return html;
+}
+
 function getEnrteWxTableHTML() {
     let html = '';
     const tafData = getProcessedEnrteWxData();
@@ -2847,13 +2947,17 @@ function renderDepArrWxPage() {
     btnInit.classList.remove('active');
 
     const isDepActive = activeDepArrWxTab === 'DEP';
+    const isAtisActive = activeDepArrWxTab === 'ATIS';
 
     mainContent.innerHTML = `
         <!-- Folder Tabs -->
         <div class="fms-tabs" style="margin-bottom: 6px;">
-            <div class="fms-tab ${isDepActive ? 'active' : ''}" id="tab-dep-arr-wx-active">DEP WX</div>
-            <div class="fms-tab ${!isDepActive ? 'active' : ''}" id="tab-dep-arr-wx-crew">ARR WX</div>
+            <div class="fms-tab ${activeDepArrWxTab === 'DEP' ? 'active' : ''}" id="tab-dep-arr-wx-active">DEP WX</div>
+            <div class="fms-tab ${activeDepArrWxTab === 'ARR' ? 'active' : ''}" id="tab-dep-arr-wx-crew">ARR WX</div>
+            <div class="fms-tab ${isAtisActive ? 'active' : ''}" id="tab-dep-arr-wx-atis">ATIS</div>
         </div>
+
+        ${isAtisActive ? getAtisWarningBannerHTML() : ''}
 
         <!-- Row 1: FLT NUMBER & Page Number & Navigation -->
         <div class="fms-row" style="margin-bottom: 2px;">
@@ -2874,19 +2978,19 @@ function renderDepArrWxPage() {
             </div>
         </div>
 
-        <!-- Row 2: ETD/ETA & LOCAL -->
-        <div class="fms-row" style="margin-bottom: 4px;">
+        <!-- Row 2: ETD/ETA & LOCAL (ATIS 탭에서는 숨김 — DEP/ARR 둘 다 표시 대상이라 의미 없음) -->
+        <div class="fms-row" style="margin-bottom: 4px; ${isAtisActive ? 'visibility:hidden; height:0; margin:0; overflow:hidden;' : ''}">
             <div class="fms-cell" style="justify-content: flex-start; gap: 8px; font-size: 0.9rem;">
                 <span class="text-white-fms">${isDepActive ? 'ETD' : 'ETA'}</span>
                 <span class="text-green-fms" style="font-weight: bold; margin-right: 15px;">
-                    ${isDepActive 
-                        ? (flightData.etd ? flightData.etd.replace(':', '') + 'Z' : '1710Z') 
+                    ${isDepActive
+                        ? (flightData.etd ? flightData.etd.replace(':', '') + 'Z' : '1710Z')
                         : (flightData.eta ? flightData.eta.replace(':', '') + 'Z' : '0612Z')}
                 </span>
                 <span class="text-white-fms">LOCAL</span>
                 <span style="color: var(--text-green); font-weight: bold;">
-                    ${isDepActive 
-                        ? getLocalTimeStr(flightData.etd || '17:10', getAirportOffset(flightData.from || 'KLAX')) 
+                    ${isDepActive
+                        ? getLocalTimeStr(flightData.etd || '17:10', getAirportOffset(flightData.from || 'KLAX'))
                         : getLocalTimeStr(flightData.eta || '06:12', getAirportOffset(flightData.to || 'RKSI'))}
                 </span>
             </div>
@@ -2895,14 +2999,14 @@ function renderDepArrWxPage() {
         <!-- Table (13 rows) -->
         <table class="rte-summary-table mel-cdl-table" style="margin-bottom: 4px;">
             <tbody>
-                ${getDepArrWxTableHTML()}
+                ${isAtisActive ? getAtisTableHTML() : getDepArrWxTableHTML()}
             </tbody>
         </table>
 
-        <!-- Table Vertical Scroll Navigation (Hidden for TAF) -->
-        <div style="display: flex; justify-content: center; gap: 8px; margin-bottom: 4px; visibility: hidden; height: 28px;">
-            <button class="fms-btn-grey fms-btn-scroll" style="width: 38px; height: 28px; font-size: 0.65rem; padding: 2px;">▼▼</button>
-            <button class="fms-btn-grey fms-btn-scroll" style="width: 38px; height: 28px; font-size: 0.65rem; padding: 2px;">▲▲</button>
+        <!-- Table Vertical Scroll Navigation (ATIS 탭만 활성화 — 텍스트가 길어 스크롤 필요) -->
+        <div style="display: flex; justify-content: center; gap: 8px; margin-bottom: 4px; ${isAtisActive ? '' : 'visibility: hidden;'} height: 28px;">
+            <button class="fms-btn-grey" id="btn-atis-scroll-down" style="width: 38px; height: 28px; font-size: 0.65rem; padding: 2px;">▼▼</button>
+            <button class="fms-btn-grey" id="btn-atis-scroll-up" style="width: 38px; height: 28px; font-size: 0.65rem; padding: 2px;">▲▲</button>
         </div>
 
         <!-- Bottom Actions Row -->
@@ -4063,6 +4167,7 @@ document.body.addEventListener('click', (e) => {
         resetTitleBar();
         activeMelCdlTab = 'MEL';
         activeDepArrWxTab = 'DEP';
+        atisScrollIndex = 0;
         activeDepArrNotamTab = 'DEP';
         activeEnrteNotamTab = 'ALTN';
         activeEnrteWxTab = 'ALTN';
@@ -4190,6 +4295,34 @@ document.body.addEventListener('click', (e) => {
     if (e.target.closest('#tab-dep-arr-wx-crew')) {
         activeDepArrWxTab = 'ARR';
         renderDepArrWxPage();
+    }
+
+    // Toggle ATIS tab (D-ATIS — 진입 시점에만 조회, 10분 캐싱)
+    if (e.target.closest('#tab-dep-arr-wx-atis')) {
+        activeDepArrWxTab = 'ATIS';
+        atisScrollIndex = 0;
+        renderDepArrWxPage();
+        fetchAtis().then(() => {
+            // 경고 배너는 tbody 밖에 있어 전체 재렌더 필요 (탭이 바뀌지 않았을 때만)
+            if (activeDepArrWxTab === 'ATIS') renderDepArrWxPage();
+        });
+    }
+
+    // Scroll down click for ATIS Table
+    if (e.target.closest('#btn-atis-scroll-down')) {
+        const maxScroll = Math.max(0, buildAtisLines().length - 13);
+        atisScrollIndex = Math.min(atisScrollIndex + 13, maxScroll);
+        const tbody = document.querySelector('.mel-cdl-table tbody');
+        if (tbody) tbody.innerHTML = getAtisTableHTML();
+    }
+
+    // Scroll up click for ATIS Table
+    if (e.target.closest('#btn-atis-scroll-up')) {
+        if (atisScrollIndex > 0) {
+            atisScrollIndex = Math.max(0, atisScrollIndex - 13);
+            const tbody = document.querySelector('.mel-cdl-table tbody');
+            if (tbody) tbody.innerHTML = getAtisTableHTML();
+        }
     }
 
     // Toggle DEP NOTAM tab
