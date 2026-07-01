@@ -690,3 +690,9 @@ body {
     border-color: #ffffff !important;
 }
 
+/* CABIN BRIEFING NOTES — contenteditable이라 비어있을 때 placeholder를 CSS로 표시 */
+#cabin-briefing-textarea:empty::before {
+    content: attr(data-placeholder);
+    color: #666;
+}
+

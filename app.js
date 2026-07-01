@@ -4109,69 +4109,90 @@ function getRoundedFltTimeStr() {
     return `${String(rh).padStart(2, '0')}:${String(rm).padStart(2, '0')}`;
 }
 
-// WX INFO NOTES 기본 문구 — 매 비행 동일, 사용자가 지우거나 고쳐 쓰면 그 내용이 저장됨
-const WX_NOTES_DEFAULT_TEXT = `* SEATBELT SIGN
-1 Time : LGT Turbulence is expected.
-2 Times : MOD/SVR Turbulence is expected.
-If 2 Times, 승객 착석 지시 및 승무원도 가까운 좌석에 착석.
+function escapeHtmlForNotes(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
 
-PA는 1차적으로 CABIN에서 실시해 주시고,
-서비스 가능 여부는 사무장님과 협조 후 재개 여부를 결정.`;
+// "- " 로 시작하는 줄(제목줄)은 흰색 굵게, 나머지는 기본 초록색으로 렌더
+function buildDefaultNotesHTML(lines) {
+    return lines.map(line => {
+        if (line === '') return '<div>&nbsp;</div>';
+        const isTitle = /^- /.test(line);
+        return `<div style="${isTitle ? 'color:#fff; font-weight:bold;' : ''}">${escapeHtmlForNotes(line)}</div>`;
+    }).join('');
+}
+
+// WX INFO NOTES 기본 문구 — 매 비행 동일, 사용자가 지우거나 고쳐 쓰면 그 내용이 저장됨
+const WX_NOTES_DEFAULT_HTML = buildDefaultNotesHTML([
+    '- SEATBELT SIGN',
+    '1 Time : LGT Turbulence is expected.',
+    '2 Times : MOD/SVR Turbulence is expected.',
+    'If 2 Times, 승객 착석 지시 및 승무원도 가까운 좌석에 착석.',
+    '',
+    'PA는 1차적으로 CABIN에서 실시해 주시고,',
+    '서비스 가능 여부는 사무장님과 협조 후 재개 여부를 결정.',
+]);
 
 // SECURITY NOTES 기본 문구 — 매 비행 동일, 사용자가 지우거나 고쳐 쓰면 그 내용이 저장됨
-const SECURITY_NOTES_DEFAULT_TEXT = `- SECURITY SEARCH
-보안등급(   )에 맞는 보안점검 실시, 비상벨 점검 요청 (5+4 / 9 ZONE)
-기내 거동 수상자, 의심스런 물건 발견시 즉시 기장에게 보고.
-
-- CKPT ENTRY PROCEDURE
-조종실 앞 CLEAN ZONE 확보, INT 통화 후, CKPT DOOR ENTRY CODE (#) INPUT.
-
-- 2 CREWs RULE 강조 및 협조 요청
-
-- STERILE CKPT PROCEDURE below 10,000 ft
-불필요한 INT CALL 지양 (이착륙 및 중요단계)
-
-- EMERG ALERT SIGNAL (FOM S 2.3)
-INT "EMER" PUSH (A380)`;
+const SECURITY_NOTES_DEFAULT_HTML = buildDefaultNotesHTML([
+    '- SECURITY SEARCH',
+    '보안등급(   )에 맞는 보안점검 실시, 비상벨 점검 요청 (5+4 / 9 ZONE)',
+    '기내 거동 수상자, 의심스런 물건 발견시 즉시 기장에게 보고.',
+    '',
+    '- CKPT ENTRY PROCEDURE',
+    '조종실 앞 CLEAN ZONE 확보, INT 통화 후, CKPT DOOR ENTRY CODE (#) INPUT.',
+    '',
+    '- 2 CREWs RULE 강조 및 협조 요청',
+    '',
+    '- STERILE CKPT PROCEDURE below 10,000 ft',
+    '불필요한 INT CALL 지양 (이착륙 및 중요단계)',
+    '',
+    '- EMERG ALERT SIGNAL (FOM S 2.3)',
+    'INT "EMER" PUSH (A380)',
+]);
 
 // EMERG PROC NOTES 기본 문구 — 매 비행 동일, 사용자가 지우거나 고쳐 쓰면 그 내용이 저장됨
-const EMERG_NOTES_DEFAULT_TEXT = `- RTO 직후
-PA "ATTENTION, CREW AT STATION" 시에는 EMERG EVAC 대비
-PA "PAX/CREW REMAIN SEATED" 시에는 기내방송 실시 요청. GATE RETURN 예상.
-좌/우 창문을 통해 외부의 SMOKE/FIRE 여부를 즉시 기장에게 보고 요청.
-
-- 기내화재 발생 시
-화재발생 인지 후, 즉시 기장에게 보고.
-안전/보호장비 착용 후, 화재진압 실시. 승무원 한 명은 기장과 통화 유지.
-
-- 기내환자 발생 시
-초등조치 이후, 즉시 기장에게 보고`;
+const EMERG_NOTES_DEFAULT_HTML = buildDefaultNotesHTML([
+    '- RTO 직후',
+    'PA "ATTENTION, CREW AT STATION" 시에는 EMERG EVAC 대비',
+    'PA "PAX/CREW REMAIN SEATED" 시에는 기내방송 실시 요청. GATE RETURN 예상.',
+    '좌/우 창문을 통해 외부의 SMOKE/FIRE 여부를 즉시 기장에게 보고 요청.',
+    '',
+    '- 기내화재 발생 시',
+    '화재발생 인지 후, 즉시 기장에게 보고.',
+    '안전/보호장비 착용 후, 화재진압 실시. 승무원 한 명은 기장과 통화 유지.',
+    '',
+    '- 기내환자 발생 시',
+    '초등조치 이후, 즉시 기장에게 보고',
+]);
 
 // CREW COORD NOTES 기본 문구 — 매 비행 동일, 사용자가 지우거나 고쳐 쓰면 그 내용이 저장됨
-const CREW_NOTES_DEFAULT_TEXT = `- DOOR CLOSE 이전
-LOAD SHEET EDITION No, PAX No 보고.
+const CREW_NOTES_DEFAULT_HTML = buildDefaultNotesHTML([
+    '- DOOR CLOSE 이전',
+    'LOAD SHEET EDITION No, PAX No 보고.',
+    '',
+    '- DOOR CLOSE 이후',
+    '지상이동 준비 상태를 기장에게 보고.',
+    '',
+    '- CREW MEAL 요청',
+    '이륙 후 30-40분 후 요청.',
+    '',
+    '- 기타 비행에 관한 추가 사항, 질문 사항',
+    '',
+    '- KLAX, KJFK AIRPORT TAXING 중 유의사항',
+]);
 
-- DOOR CLOSE 이후
-지상이동 준비 상태를 기장에게 보고.
-
-- CREW MEAL 요청
-이륙 후 30-40분 후 요청.
-
-- 기타 비행에 관한 추가 사항, 질문 사항
-
-- KLAX, KJFK AIRPORT TAXING 중 유의사항`;
-
-function getCabinBriefingNotesHTML(tabKey, defaultText) {
-    const text = cabinBriefingNotes[tabKey] || defaultText || '';
+function getCabinBriefingNotesHTML(tabKey, defaultHTML) {
+    const html = cabinBriefingNotes[tabKey] || defaultHTML || '';
     return `
         <div style="margin-top: 8px; flex-grow: 1; display: flex; flex-direction: column; min-height: 60px;">
             <span style="color: var(--text-gray); font-size: 0.68rem; margin-bottom: 3px;">NOTES</span>
-            <textarea id="cabin-briefing-textarea" placeholder="추가 메모..." style="
-                flex-grow: 1; width: 100%; resize: none; box-sizing: border-box;
+            <div id="cabin-briefing-textarea" contenteditable="true" data-placeholder="추가 메모..." style="
+                flex-grow: 1; width: 100%; box-sizing: border-box; overflow-y: auto;
                 background-color: #111419; border: 1.5px solid #2f3542; border-radius: 4px;
                 color: var(--text-green); font-family: 'Share Tech Mono', monospace;
-                font-size: 0.78rem; padding: 6px; line-height: 1.4;
-            ">${text}</textarea>
+                font-size: 0.78rem; padding: 6px; line-height: 1.4; outline: none;
+            ">${html}</div>
         </div>
     `;
 }
@@ -4231,7 +4252,7 @@ function getCabinBriefingContentHTML() {
                 <div style="font-size: 0.74rem; margin-top: 4px; line-height: 1.6;">${turbSummary}</div>
             </div>
             <div style="height: 10px;"></div>
-            ${getCabinBriefingNotesHTML('WX', WX_NOTES_DEFAULT_TEXT)}
+            ${getCabinBriefingNotesHTML('WX', WX_NOTES_DEFAULT_HTML)}
         `;
     }
     if (activeCabinBriefingTab === 'SECURITY') {
@@ -4260,7 +4281,7 @@ function getCabinBriefingContentHTML() {
                 '• Sterile Cockpit: Below 10,000 feet',
                 '• Emergency Alert Signal (FOM S2.3)',
             ])}
-            ${getCabinBriefingNotesHTML('SECURITY', SECURITY_NOTES_DEFAULT_TEXT)}
+            ${getCabinBriefingNotesHTML('SECURITY', SECURITY_NOTES_DEFAULT_HTML)}
         `;
     }
     if (activeCabinBriefingTab === 'EMERG') {
@@ -4269,7 +4290,7 @@ function getCabinBriefingContentHTML() {
                 '• Reject Takeoff',
                 '• PA &amp; Evacuation Signal',
             ])}
-            ${getCabinBriefingNotesHTML('EMERG', EMERG_NOTES_DEFAULT_TEXT)}
+            ${getCabinBriefingNotesHTML('EMERG', EMERG_NOTES_DEFAULT_HTML)}
         `;
     }
     // CREW
@@ -4283,7 +4304,7 @@ function getCabinBriefingContentHTML() {
             '• Timing of In-flight services (in consultation with the Purser)',
             '• Special CIQ Procedure (if required)',
         ])}
-        ${getCabinBriefingNotesHTML('CREW', CREW_NOTES_DEFAULT_TEXT)}
+        ${getCabinBriefingNotesHTML('CREW', CREW_NOTES_DEFAULT_HTML)}
     `;
 }
 
@@ -4319,7 +4340,7 @@ function renderCabinBriefingPage() {
     if (ta) {
         let saveTimer = null;
         ta.addEventListener('input', () => {
-            cabinBriefingNotes[activeCabinBriefingTab] = ta.value;
+            cabinBriefingNotes[activeCabinBriefingTab] = ta.innerHTML;
             clearTimeout(saveTimer);
             saveTimer = setTimeout(() => saveCabinBriefingNotes(), 400);
         });
