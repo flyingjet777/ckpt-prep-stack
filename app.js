@@ -42,6 +42,8 @@ const flightData = {
     fuelStat95: '',
     fuelStat99: '',
     acftReg: '',
+    acftType: '',           // OFP A/C REG.MK 줄의 기종 코드 (예: 388 = A380-800)
+    fltTime: '',            // OFP F/T (TRIP 비행시간), "HH:MM"
     etd: '',
     eta: '',
     flightDay: '',
@@ -65,7 +67,14 @@ const flightData = {
     gateStatus: 'idle',   // 'idle' | 'loading' | 'done' | 'error'
     depMetar: null,        // { raw, flight_category, observed } — aviationweather.gov
     arrMetar: null,
-    metarCacheTime: 0      // Date.now() at last fetch — 15분 캐싱
+    metarCacheTime: 0,     // Date.now() at last fetch — 15분 캐싱
+
+    // CABIN BRIEFING — 운항승무원 명단 (수동 입력, P1/F1/P2/F2/EX1 5명)
+    p1Name: '',
+    f1Name: '',
+    p2Name: '',
+    f2Name: '',
+    ex1Name: ''
 };
 
 // Keep track of raw values parsed from PDF
@@ -1953,6 +1962,18 @@ let memoDrawColor = '#888888';
 let memoDrawSize = 3;
 let memoIsErasing = false;
 
+// ── CABIN BRIEFING (Joint Briefing Item 기반) — 탭별 메모 + SEC LEVEL, 기기별 localStorage 저장 ──
+let activeCabinBriefingTab = 'FLT'; // 'FLT' | 'WX' | 'SECURITY' | 'EMERG' | 'CREW'
+let cabinBriefingNotes = (() => {
+    try { return JSON.parse(localStorage.getItem('ckpt_cabin_briefing_notes')) || {}; }
+    catch { return {}; }
+})();
+let cabinBriefingSecLevel = localStorage.getItem('ckpt_cabin_briefing_sec_level') || 'BLUE';
+
+function saveCabinBriefingNotes() {
+    localStorage.setItem('ckpt_cabin_briefing_notes', JSON.stringify(cabinBriefingNotes));
+}
+
 // --- Step Altitude Transition Data ---
 const stepAltData = [
     { wpt: '--------', alt: '---', dist: '', time: '' },
@@ -2343,7 +2364,7 @@ function renderInitPage() {
             </div>
             <div class="bottom-aligned-row">
                 <button class="fms-btn-grey align-target-btn btn-step-alts-trigger" style="border-color: #ffffff; color: #ffffff;">STEP ALT</button>
-                <button class="fms-btn-grey align-target-btn btn-crew-briefing-trigger" style="border-color: #ffffff; color: #ffffff; font-size: 0.7rem;">CREW/CABIN<br>BRIEFING</button>
+                <button class="fms-btn-grey align-target-btn btn-crew-briefing-trigger" style="border-color: #ffffff; color: #ffffff; font-size: 0.62rem; white-space: nowrap;">CABIN BRIEFING</button>
             </div>
         </div>
     `;
@@ -2965,7 +2986,7 @@ function renderDepArrWxPage() {
                 <div class="cell-left" style="gap: 10px; align-items: center;">
                     <span class="fms-label" style="width: auto; margin-right: 0;">FLT NUMBER</span>
                     <div class="fms-val-box cyan-text" style="width: 140px; justify-content: space-between;">
-                        <span>${flightData.fltNbr || 'AAR201'}</span><span class="arrow-down">▼</span>
+                        <span>${flightData.fltNbr || '----'}</span><span class="arrow-down">▼</span>
                     </div>
                 </div>
                 <div class="cell-right" style="gap: 12px; align-items: center;">
@@ -2984,14 +3005,14 @@ function renderDepArrWxPage() {
                 <span class="text-white-fms">${isDepActive ? 'ETD' : 'ETA'}</span>
                 <span class="text-green-fms" style="font-weight: bold; margin-right: 15px;">
                     ${isDepActive
-                        ? (flightData.etd ? flightData.etd.replace(':', '') + 'Z' : '1710Z')
-                        : (flightData.eta ? flightData.eta.replace(':', '') + 'Z' : '0612Z')}
+                        ? (flightData.etd ? flightData.etd.replace(':', '') + 'Z' : '----')
+                        : (flightData.eta ? flightData.eta.replace(':', '') + 'Z' : '----')}
                 </span>
                 <span class="text-white-fms">LOCAL</span>
                 <span style="color: var(--text-green); font-weight: bold;">
                     ${isDepActive
-                        ? getLocalTimeStr(flightData.etd || '17:10', getAirportOffset(flightData.from || 'KLAX'))
-                        : getLocalTimeStr(flightData.eta || '06:12', getAirportOffset(flightData.to || 'RKSI'))}
+                        ? (flightData.etd ? getLocalTimeStr(flightData.etd, getAirportOffset(flightData.from)) : '----')
+                        : (flightData.eta ? getLocalTimeStr(flightData.eta, getAirportOffset(flightData.to)) : '----')}
                 </span>
             </div>
         </div>
@@ -3044,7 +3065,7 @@ function renderDepArrNotamPage() {
                 <div class="cell-left" style="gap: 10px; align-items: center;">
                     <span class="fms-label" style="width: auto; margin-right: 0;">FLT NUMBER</span>
                     <div class="fms-val-box cyan-text" style="width: 140px; justify-content: space-between;">
-                        <span>${flightData.fltNbr || 'AAR201'}</span><span class="arrow-down">▼</span>
+                        <span>${flightData.fltNbr || '----'}</span><span class="arrow-down">▼</span>
                     </div>
                 </div>
                 <div class="cell-right" style="gap: 12px; align-items: center;">
@@ -3069,8 +3090,8 @@ function renderDepArrNotamPage() {
                 <span class="text-white-fms">LOCAL</span>
                 <span style="color: var(--text-green); font-weight: bold;">
                     ${isDepActive
-                        ? getLocalTimeStr(flightData.etd || '00:00', getAirportOffset(flightData.from || 'RKSI'))
-                        : getLocalTimeStr(flightData.eta || '00:00', getAirportOffset(flightData.to || 'KJFK'))}
+                        ? (flightData.etd ? getLocalTimeStr(flightData.etd, getAirportOffset(flightData.from)) : '----')
+                        : (flightData.eta ? getLocalTimeStr(flightData.eta, getAirportOffset(flightData.to)) : '----')}
                 </span>
             </div>
         </div>
@@ -3327,7 +3348,7 @@ function renderEnrteNotamPage() {
                 </span>
                 <span class="text-white-fms">LOCAL</span>
                 <span style="color: var(--text-green); font-weight: bold;">
-                    ${getLocalTimeStr(flightData.eta || '00:00', getAirportOffset(flightData.altn || 'KPHL'))}
+                    ${flightData.eta ? getLocalTimeStr(flightData.eta, getAirportOffset(flightData.altn)) : '----'}
                 </span>
                 ` : `
                 <span class="text-white-fms">EDTO NOTAM</span>
@@ -3482,7 +3503,7 @@ function renderEnrteWxPage() {
                 <div class="cell-left" style="gap: 10px; align-items: center;">
                     <span class="fms-label" style="width: auto; margin-right: 0;">FLT NUMBER</span>
                     <div class="fms-val-box cyan-text" style="width: 140px; justify-content: space-between;">
-                        <span>${flightData.fltNbr || 'AAR201'}</span><span class="arrow-down">▼</span>
+                        <span>${flightData.fltNbr || '----'}</span><span class="arrow-down">▼</span>
                     </div>
                 </div>
                 <div class="cell-right" style="gap: 12px; align-items: center;">
@@ -3500,11 +3521,11 @@ function renderEnrteWxPage() {
             <div class="fms-cell" style="justify-content: flex-start; gap: 8px; font-size: 0.9rem;">
                 <span class="text-white-fms">ETA</span>
                 <span class="text-green-fms" style="font-weight: bold; margin-right: 15px;">
-                    ${flightData.eta ? flightData.eta.replace(':', '') + 'Z' : '0612Z'}
+                    ${flightData.eta ? flightData.eta.replace(':', '') + 'Z' : '----'}
                 </span>
                 <span class="text-white-fms">LOCAL</span>
                 <span style="color: var(--text-green); font-weight: bold;">
-                    ${getLocalTimeStr(flightData.eta || '06:12', getAirportOffset(flightData.to || 'RKSI'))}
+                    ${flightData.eta ? getLocalTimeStr(flightData.eta, getAirportOffset(flightData.to)) : '----'}
                 </span>
             </div>
         </div>
@@ -3929,10 +3950,11 @@ function renderStepAltsPage() {
     `;
     btnInit.classList.remove('active');
 
-    const initialFL = stepAltData[0] ? stepAltData[0].alt.replace('FL', '') : (flightData.crzFl || '350');
+    const hasStepAltData = stepAltData[0] && stepAltData[0].alt !== '---';
+    const initialFL = hasStepAltData ? stepAltData[0].alt.replace('FL', '') : (flightData.crzFl || '---');
 
     const zones = flightData.turbZones || [];
-    
+
     let zonesHTML = '';
     if (zones.length > 0) {
         zonesHTML = zones.map(z => `
@@ -3950,28 +3972,7 @@ function renderStepAltsPage() {
         `).join('');
     } else {
         zonesHTML = `
-            <div style="display: grid; grid-template-columns: 165px 68px 1fr; align-items: center; width: 100%;">
-                <div style="color: #ffffff; text-align: left;">
-                    AT <span style="color: var(--text-green);">ETP2 / ASTER</span>
-                </div>
-                <div style="color: #ffffff; text-align: left;">
-                    SR <span style="color: var(--text-green);">04-05</span>
-                </div>
-                <div style="color: #ffffff; text-align: left;">
-                    TIME AFTER DEP <span style="color: var(--text-green);">07+59 / 10+28</span>
-                </div>
-            </div>
-            <div style="display: grid; grid-template-columns: 165px 68px 1fr; align-items: center; width: 100%;">
-                <div style="color: #ffffff; text-align: left;">
-                    AT <span style="color: var(--text-red);">SDE / GTC</span>
-                </div>
-                <div style="color: #ffffff; text-align: left;">
-                    SR <span style="color: var(--text-red);">08</span>
-                </div>
-                <div style="color: #ffffff; text-align: left;">
-                    TIME AFTER DEP <span style="color: var(--text-red);">10+44 / 10+58</span>
-                </div>
-            </div>
+            <div style="color: #666; text-align: center; padding: 8px 0;">데이터 없음 (OFP IMPORT 필요)</div>
         `;
     }
 
@@ -4021,6 +4022,308 @@ function renderStepAltsPage() {
         </div>
     `;
     updateStepAltsTableOnly();
+}
+
+// ══════════════════════════════════════════════════════════════════
+//  CABIN BRIEFING — Joint Briefing Item 체크리스트 + 자동 채움 + 탭별 메모
+// ══════════════════════════════════════════════════════════════════
+
+function getBriefingInfoRowHTML(label, value, color) {
+    return `<div style="margin-bottom: 6px;">
+        <span style="color: var(--text-gray); font-size: 0.72rem;">${label}</span>
+        <span style="color: ${color || '#fff'}; font-size: 0.78rem; font-weight: bold; margin-left: 6px;">${value || '---'}</span>
+    </div>`;
+}
+
+function getCabinBriefingChecklistHTML(items) {
+    return `<div style="font-size: 0.74rem; line-height: 1.55; color: #fff;">
+        ${items.map(i => `<div style="margin-bottom: 3px;">${i}</div>`).join('')}
+    </div>`;
+}
+
+function getBriefingWxTitleHTML(label) {
+    return `<div style="font-size: 0.85rem; font-weight: bold; color: var(--text-cyan);
+                margin-top: 10px; padding-bottom: 3px; border-bottom: 1px solid #2f3542;
+                letter-spacing: 0.5px;">${label}</div>`;
+}
+
+// METAR 원문/TIME/QNH는 제외하고 공항코드+WIND·VIS·TEMP·비행범주만 간단히 요약
+function getBriefingWxLineHTML(metarObj, icao) {
+    const icaoTag = icao
+        ? `<span style="color: var(--text-green); font-weight: bold; margin-right: 8px;">${icao}</span>`
+        : '';
+    if (!metarObj || !metarObj.raw) {
+        return `<div style="font-size: 0.74rem; color: #666; margin-top: 4px;">${icaoTag}데이터 없음</div>`;
+    }
+    const cat = metarObj.flight_category || '';
+    const color = getMetarCategoryColor(cat);
+    const catBadge = cat
+        ? `<span style="background:${color}22; color:${color}; border:1px solid ${color};
+               border-radius:3px; padding:0 5px; font-size:0.68rem; margin-right:8px;">${cat}</span>`
+        : '';
+    // aviationweather.gov는 6/10마일 이상일 때 "6+"/"10+" 형태로 내려줌 — "+6SM"/"+10SM"로 표기
+    let visStr = '';
+    if (metarObj.visib != null) {
+        const visRaw = String(metarObj.visib);
+        visStr = visRaw.endsWith('+') ? `+${visRaw.slice(0, -1)}SM` : `${visRaw}SM`;
+    }
+    const parts = [
+        (metarObj.wdir != null && metarObj.wspd != null) ? `WIND ${String(metarObj.wdir).padStart(3, '0')}/${metarObj.wspd}KT` : '',
+        visStr ? `VIS ${visStr}` : '',
+        metarObj.temp != null ? `TEMP ${Math.round(metarObj.temp)}°C` : '',
+    ].filter(Boolean).join('   ');
+    return `<div style="font-size: 0.76rem; margin-top: 4px; color: #fff;">${icaoTag}${catBadge}${parts}</div>`;
+}
+
+function getCrzFlRangeStr() {
+    const alts = (stepAltData || [])
+        .map(s => s.alt)
+        .filter(a => a && /^FL\d+$/.test(a))
+        .map(a => parseInt(a.replace('FL', ''), 10));
+    if (alts.length === 0) return flightData.crzFl ? `FL${flightData.crzFl}` : '---';
+    const min = Math.min(...alts);
+    const max = Math.max(...alts);
+    return min === max ? `FL${min}` : `FL${min} - FL${max}`;
+}
+
+function getCrewNameInputRowHTML(label, field) {
+    return `
+        <div class="cell-left" style="gap: 6px; align-items: center;">
+            <span class="fms-label" style="width: auto; margin-right: 0; font-size: 0.7rem;">${label}</span>
+            <div class="fms-val-box extracted-value" style="width: 110px;">
+                <input type="text" value="${flightData[field] || ''}" data-field="${field}" placeholder="성명" style="width: 100%; font-size: 0.8rem;">
+            </div>
+        </div>
+    `;
+}
+
+// 반올림 예상 비행시간 — OFP 정확한 F/T에 10분을 더한 뒤 10분 단위로 반올림 (사사오입)
+function getRoundedFltTimeStr() {
+    if (!flightData.fltTime) return null;
+    const [h, m] = flightData.fltTime.split(':').map(Number);
+    if (isNaN(h) || isNaN(m)) return null;
+    let totalMin = h * 60 + m + 10;
+    totalMin = Math.round(totalMin / 10) * 10;
+    const rh = Math.floor(totalMin / 60);
+    const rm = totalMin % 60;
+    return `${String(rh).padStart(2, '0')}:${String(rm).padStart(2, '0')}`;
+}
+
+// WX INFO NOTES 기본 문구 — 매 비행 동일, 사용자가 지우거나 고쳐 쓰면 그 내용이 저장됨
+const WX_NOTES_DEFAULT_TEXT = `* SEATBELT SIGN
+1 Time : LGT Turbulence is expected.
+2 Times : MOD/SVR Turbulence is expected.
+If 2 Times, 승객 착석 지시 및 승무원도 가까운 좌석에 착석.
+
+PA는 1차적으로 CABIN에서 실시해 주시고,
+서비스 가능 여부는 사무장님과 협조 후 재개 여부를 결정.`;
+
+// SECURITY NOTES 기본 문구 — 매 비행 동일, 사용자가 지우거나 고쳐 쓰면 그 내용이 저장됨
+const SECURITY_NOTES_DEFAULT_TEXT = `- SECURITY SEARCH
+보안등급(   )에 맞는 보안점검 실시, 비상벨 점검 요청 (5+4 / 9 ZONE)
+기내 거동 수상자, 의심스런 물건 발견시 즉시 기장에게 보고.
+
+- CKPT ENTRY PROCEDURE
+조종실 앞 CLEAN ZONE 확보, INT 통화 후, CKPT DOOR ENTRY CODE (#) INPUT.
+
+- 2 CREWs RULE 강조 및 협조 요청
+
+- STERILE CKPT PROCEDURE below 10,000 ft
+불필요한 INT CALL 지양 (이착륙 및 중요단계)
+
+- EMERG ALERT SIGNAL (FOM S 2.3)
+INT "EMER" PUSH (A380)`;
+
+// EMERG PROC NOTES 기본 문구 — 매 비행 동일, 사용자가 지우거나 고쳐 쓰면 그 내용이 저장됨
+const EMERG_NOTES_DEFAULT_TEXT = `- RTO 직후
+PA "ATTENTION, CREW AT STATION" 시에는 EMERG EVAC 대비
+PA "PAX/CREW REMAIN SEATED" 시에는 기내방송 실시 요청. GATE RETURN 예상.
+좌/우 창문을 통해 외부의 SMOKE/FIRE 여부를 즉시 기장에게 보고 요청.
+
+- 기내화재 발생 시
+화재발생 인지 후, 즉시 기장에게 보고.
+안전/보호장비 착용 후, 화재진압 실시. 승무원 한 명은 기장과 통화 유지.
+
+- 기내환자 발생 시
+초등조치 이후, 즉시 기장에게 보고`;
+
+// CREW COORD NOTES 기본 문구 — 매 비행 동일, 사용자가 지우거나 고쳐 쓰면 그 내용이 저장됨
+const CREW_NOTES_DEFAULT_TEXT = `- DOOR CLOSE 이전
+LOAD SHEET EDITION No, PAX No 보고.
+
+- DOOR CLOSE 이후
+지상이동 준비 상태를 기장에게 보고.
+
+- CREW MEAL 요청
+이륙 후 30-40분 후 요청.
+
+- 기타 비행에 관한 추가 사항, 질문 사항
+
+- KLAX, KJFK AIRPORT TAXING 중 유의사항`;
+
+function getCabinBriefingNotesHTML(tabKey, defaultText) {
+    const text = cabinBriefingNotes[tabKey] || defaultText || '';
+    return `
+        <div style="margin-top: 8px; flex-grow: 1; display: flex; flex-direction: column; min-height: 60px;">
+            <span style="color: var(--text-gray); font-size: 0.68rem; margin-bottom: 3px;">NOTES</span>
+            <textarea id="cabin-briefing-textarea" placeholder="추가 메모..." style="
+                flex-grow: 1; width: 100%; resize: none; box-sizing: border-box;
+                background-color: #111419; border: 1.5px solid #2f3542; border-radius: 4px;
+                color: var(--text-green); font-family: 'Share Tech Mono', monospace;
+                font-size: 0.78rem; padding: 6px; line-height: 1.4;
+            ">${text}</textarea>
+        </div>
+    `;
+}
+
+function getCabinBriefingContentHTML() {
+    if (activeCabinBriefingTab === 'FLT') {
+        const etdZ = flightData.etd ? flightData.etd.replace(':', '') + 'Z' : '---';
+        const etaZ = flightData.eta ? flightData.eta.replace(':', '') + 'Z' : '---';
+        const etdLt = flightData.etd ? getLocalTimeStr(flightData.etd, getAirportOffset(flightData.from)) : '';
+        const etaLt = flightData.eta ? getLocalTimeStr(flightData.eta, getAirportOffset(flightData.to)) : '';
+        const roundedFltTime = getRoundedFltTimeStr();
+        const fltTimeStr = roundedFltTime ? `${roundedFltTime} (${flightData.fltTime})` : '---';
+        return `
+            ${getBriefingInfoRowHTML('FLT NBR', flightData.fltNbr, 'var(--text-cyan)')}
+            ${getBriefingInfoRowHTML('A/C', `${flightData.acftReg || '---'} (${flightData.acftType || '---'})`, 'var(--text-cyan)')}
+            ${getBriefingInfoRowHTML('GATE', buildGateLabel(), 'var(--text-green)')}
+            ${getBriefingInfoRowHTML('PAX (BIZ/ECO/TTL)', flightData.paxNbr, 'var(--text-green)')}
+            ${getBriefingInfoRowHTML('ROUTE', `${flightData.from || '---'} → ${flightData.to || '---'} (ALTN ${flightData.altn || '---'})`, 'var(--text-green)')}
+            ${getBriefingInfoRowHTML('ETD / ETA', `${etdZ}${etdLt ? ' (' + etdLt + ')' : ''} / ${etaZ}${etaLt ? ' (' + etaLt + ')' : ''}`, 'var(--text-green)')}
+            ${getBriefingInfoRowHTML('FLT TIME', fltTimeStr, 'var(--text-green)')}
+            ${getBriefingInfoRowHTML('CRZ FL', getCrzFlRangeStr(), 'var(--text-green)')}
+
+            <div style="margin-top: 8px;">
+                <span style="color: var(--text-gray); font-size: 0.72rem;">FLIGHT CREW</span>
+                <div style="display: flex; flex-wrap: wrap; gap: 10px 16px; margin-top: 5px;">
+                    ${getCrewNameInputRowHTML('P1', 'p1Name')}
+                    ${getCrewNameInputRowHTML('F1', 'f1Name')}
+                </div>
+                <div style="display: flex; flex-wrap: wrap; gap: 10px 16px; margin-top: 8px;">
+                    ${getCrewNameInputRowHTML('P2', 'p2Name')}
+                    ${getCrewNameInputRowHTML('F2', 'f2Name')}
+                    ${getCrewNameInputRowHTML('EX1', 'ex1Name')}
+                </div>
+            </div>
+
+            ${getCabinBriefingNotesHTML('FLT')}
+        `;
+    }
+    if (activeCabinBriefingTab === 'WX') {
+        const zones = flightData.turbZones || [];
+        const turbSummary = zones.length > 0
+            ? zones.map(z => `
+                <div style="display: grid; grid-template-columns: 145px 60px 1fr; align-items: center; width: 100%;">
+                    <div>AT <span style="color:${z.color};">${z.label}</span></div>
+                    <div>SR <span style="color:${z.color};">${z.sr}</span></div>
+                    <div>TIME AFTER DEP <span style="color:${z.color};">${z.time}</span></div>
+                </div>
+            `).join('')
+            : '<div>예상 난기류 구간 없음 (OFP 미반영 시 STEP ALT 탭 참고)</div>';
+        return `
+            ${getBriefingWxTitleHTML('DEP WX')}
+            ${getBriefingWxLineHTML(flightData.depMetar, flightData.from)}
+            ${getBriefingWxTitleHTML('ARR WX')}
+            ${getBriefingWxLineHTML(flightData.arrMetar, flightData.to)}
+            <div style="margin: 10px 0 0;">
+                <span style="color: var(--text-gray); font-size: 0.72rem;">EXPECTED TURBULENCE</span>
+                <div style="font-size: 0.74rem; margin-top: 4px; line-height: 1.6;">${turbSummary}</div>
+            </div>
+            <div style="height: 10px;"></div>
+            ${getCabinBriefingNotesHTML('WX', WX_NOTES_DEFAULT_TEXT)}
+        `;
+    }
+    if (activeCabinBriefingTab === 'SECURITY') {
+        const levels = [
+            { key: 'GREEN',  color: '#00e676' },
+            { key: 'BLUE',   color: '#4fc3f7' },
+            { key: 'YELLOW', color: '#ffd54f' },
+            { key: 'ORANGE', color: '#ff9800' },
+            { key: 'RED',    color: '#ff6b6b' },
+        ];
+        const levelButtons = levels.map(l => `
+            <button class="fms-btn-grey btn-sec-level" data-level="${l.key}" style="
+                font-size: 0.68rem; padding: 5px 8px; flex: 1;
+                ${cabinBriefingSecLevel === l.key ? `background:${l.color}33; border-color:${l.color} !important; color:${l.color};` : ''}
+            ">${l.key}</button>
+        `).join('');
+        return `
+            <div style="margin-bottom: 8px;">
+                <span style="color: var(--text-gray); font-size: 0.72rem;">ALERT LEVEL</span>
+                <div style="display: flex; gap: 4px; margin-top: 4px;">${levelButtons}</div>
+            </div>
+            ${getCabinBriefingChecklistHTML([
+                '• Emphasize that all crew are security staff',
+                '&nbsp;&nbsp;(전 승무원은 보안 요원임을 주지하고 의심스러운 승객이나 물품 발견 시 기장에게 보고)',
+                '• Cockpit Entry Procedure (Two-Crew Rule)',
+                '• Sterile Cockpit: Below 10,000 feet',
+                '• Emergency Alert Signal (FOM S2.3)',
+            ])}
+            ${getCabinBriefingNotesHTML('SECURITY', SECURITY_NOTES_DEFAULT_TEXT)}
+        `;
+    }
+    if (activeCabinBriefingTab === 'EMERG') {
+        return `
+            ${getCabinBriefingChecklistHTML([
+                '• Reject Takeoff',
+                '• PA &amp; Evacuation Signal',
+            ])}
+            ${getCabinBriefingNotesHTML('EMERG', EMERG_NOTES_DEFAULT_TEXT)}
+        `;
+    }
+    // CREW
+    return `
+        ${getCabinBriefingChecklistHTML([
+            '• Temperature Control',
+            '• Taxi Time &amp; Ready Signal',
+            '• PA Monitoring',
+            '• Unruly Passenger',
+            '• CABIN LOG',
+            '• Timing of In-flight services (in consultation with the Purser)',
+            '• Special CIQ Procedure (if required)',
+        ])}
+        ${getCabinBriefingNotesHTML('CREW', CREW_NOTES_DEFAULT_TEXT)}
+    `;
+}
+
+function renderCabinBriefingPage() {
+    resetTitleBar();
+    pageTitleText.textContent = 'CKPT/CABIN BRIEFING';
+    btnInit.classList.remove('active');
+
+    const tabs = [
+        { key: 'FLT',      label: 'FLT INFO' },
+        { key: 'WX',       label: 'WX INFO' },
+        { key: 'SECURITY', label: 'SECURITY' },
+        { key: 'EMERG',    label: 'EMERG PROC' },
+        { key: 'CREW',     label: 'CREW COORD' },
+    ];
+
+    mainContent.innerHTML = `
+        <div class="fms-tabs" style="margin-bottom: 6px;">
+            ${tabs.map(t => `<div class="fms-tab ${activeCabinBriefingTab === t.key ? 'active' : ''}" data-cabin-tab="${t.key}">${t.label}</div>`).join('')}
+        </div>
+
+        <div style="border: 1.5px solid #2f3542; border-radius: 4px; padding: 8px 10px; background-color: #12141a;
+                     flex-grow: 1; display: flex; flex-direction: column; overflow-y: auto;">
+            ${getCabinBriefingContentHTML()}
+        </div>
+
+        <div class="fms-row" style="margin-top: auto; padding-top: 5px; margin-bottom: 3px;">
+            <button class="msg-btn btn-return" id="btn-return" style="height: 28px; width: 55px; font-size: 0.68rem; padding: 2px;">RETURN</button>
+        </div>
+    `;
+
+    const ta = document.getElementById('cabin-briefing-textarea');
+    if (ta) {
+        let saveTimer = null;
+        ta.addEventListener('input', () => {
+            cabinBriefingNotes[activeCabinBriefingTab] = ta.value;
+            clearTimeout(saveTimer);
+            saveTimer = setTimeout(() => saveCabinBriefingNotes(), 400);
+        });
+    }
 }
 
 // --- Event Listeners (Delegated) ---
@@ -4174,6 +4477,7 @@ document.body.addEventListener('click', (e) => {
         activeRteSummaryTab = 'PRIMARY';
         altnRteScrollIndex = 0;
         activeMemoTab = 'NOTEPAD';
+        activeCabinBriefingTab = 'FLT';
         depArrNotamScrollIndex = 0;
         enrteNotamScrollIndex = 0;
         renderInitPage();
@@ -4219,6 +4523,26 @@ document.body.addEventListener('click', (e) => {
     // STEP ALTs trigger from INIT page
     if (e.target.closest('.btn-step-alts-trigger')) {
         renderStepAltsPage();
+    }
+
+    // CABIN BRIEFING trigger from INIT page
+    if (e.target.closest('.btn-crew-briefing-trigger')) {
+        renderCabinBriefingPage();
+    }
+
+    // CABIN BRIEFING tab switch
+    const cabinTabEl = e.target.closest('[data-cabin-tab]');
+    if (cabinTabEl) {
+        activeCabinBriefingTab = cabinTabEl.dataset.cabinTab;
+        renderCabinBriefingPage();
+    }
+
+    // CABIN BRIEFING security level select
+    const secLevelBtn = e.target.closest('.btn-sec-level');
+    if (secLevelBtn) {
+        cabinBriefingSecLevel = secLevelBtn.dataset.level;
+        localStorage.setItem('ckpt_cabin_briefing_sec_level', cabinBriefingSecLevel);
+        renderCabinBriefingPage();
     }
 
     // Scroll down click for MEL/CDL Table
@@ -4886,10 +5210,24 @@ if (fileInputEl) {
             matchedCount++;
         }
 
-        // 16. ACFT REG (HL Number)
-        const regMatch = fullText.match(/\b(HL\d{4})\b/i);
-        if (regMatch) {
-            flightData.acftReg = regMatch[1].toUpperCase();
+        // 16. ACFT REG (HL Number) + ACFT TYPE ("A/C REG.MK ENGINE..." 헤더 다음 줄 "388 HL7634 ...")
+        const acftLineMatch = fullText.match(/A\/C\s+REG\.MK[\s\S]*?\n\s*(\d{3})\s+(HL\d{4})/i);
+        if (acftLineMatch) {
+            flightData.acftType = acftLineMatch[1];
+            flightData.acftReg = acftLineMatch[2].toUpperCase();
+            matchedCount++;
+        } else {
+            const regMatch = fullText.match(/\b(HL\d{4})\b/i);
+            if (regMatch) {
+                flightData.acftReg = regMatch[1].toUpperCase();
+                matchedCount++;
+            }
+        }
+
+        // 16b. FLT TIME (F/T — TRIP 비행시간, "HH.MM" → "HH:MM")
+        const fltTimeMatch = fullText.match(/F\/T\s+(\d{1,2})\.(\d{2})/i);
+        if (fltTimeMatch) {
+            flightData.fltTime = fltTimeMatch[1].padStart(2, '0') + ':' + fltTimeMatch[2];
             matchedCount++;
         }
 
