@@ -23,10 +23,22 @@ app.get('/metar', async (req, res) => {
 });
 
 // 게이트 — AeroDataBox (RapidAPI 키는 서버에만 보관)
+// 무료 쿼터가 월 300유닛뿐이라 성공 응답을 30분 캐시해 중복 호출을 흡수한다.
+const GATE_CACHE_MS = 30 * 60 * 1000;
+const gateCache = new Map(); // key: "FLT|YYYY-MM-DD" → { time, data }
+
 app.get('/gate', async (req, res) => {
     const { flightNumber, date } = req.query;
     if (!flightNumber || !date) return res.status(400).json({ error: 'flightNumber, date required' });
     if (!AERODATABOX_KEY) return res.status(500).json({ error: 'server missing AERODATABOX_KEY' });
+
+    const cacheKey = `${flightNumber.toUpperCase()}|${date}`;
+    const cached = gateCache.get(cacheKey);
+    if (cached && (Date.now() - cached.time) < GATE_CACHE_MS) {
+        console.log(`[gate] cache hit: ${cacheKey}`);
+        return res.json(cached.data);
+    }
+
     try {
         const url = `https://aerodatabox.p.rapidapi.com/flights/number/${encodeURIComponent(flightNumber)}/${encodeURIComponent(date)}`;
         const r = await fetch(url, {
@@ -35,8 +47,21 @@ app.get('/gate', async (req, res) => {
                 'x-rapidapi-host': 'aerodatabox.p.rapidapi.com'
             }
         });
-        if (!r.ok) throw new Error(`upstream ${r.status}`);
+        if (!r.ok) {
+            // 429(쿼터 소진)는 클라이언트가 구분할 수 있게 상태코드를 그대로 전달
+            const status = r.status === 429 ? 429 : 502;
+            console.warn(`[gate] upstream ${r.status}: ${cacheKey}`);
+            return res.status(status).json({ error: `upstream ${r.status}` });
+        }
         const data = await r.json();
+        gateCache.set(cacheKey, { time: Date.now(), data });
+        // 캐시가 무한히 자라지 않게 오래된 항목 정리
+        if (gateCache.size > 200) {
+            const now = Date.now();
+            for (const [k, v] of gateCache) {
+                if (now - v.time >= GATE_CACHE_MS) gateCache.delete(k);
+            }
+        }
         res.json(data);
     } catch (err) {
         res.status(502).json({ error: String(err) });
