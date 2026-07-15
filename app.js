@@ -1617,7 +1617,7 @@ function buildGateLabel() {
     const g = flightData.depGate;
     const t = flightData.depTerminal;
     const s = flightData.gateStatus;
-    if (g) return t ? `T${t}  G${g}` : `G${g}`;
+    if (g) return t ? `T${t}  ${g}` : `${g}`;
     if (s === 'loading') return '...';
     if (s === 'done') return 'N/A';
     return 'GET'; // idle / quota / error — 아직 조회 안 함 또는 재시도 필요
