@@ -1,9 +1,9 @@
-const CACHE_NAME = 'a380-mfd-v34';
+const CACHE_NAME = 'a380-mfd-v35';
 // 주의: app.js/index.css는 index.html의 ?v= 쿼리와 동일해야 프리캐시가 실제로 사용됨
 const ASSETS = [
   './index.html',
   './index.css?v=60',
-  './app.js?v=91',
+  './app.js?v=92',
   './manifest.json',
   'https://fonts.googleapis.com/css2?family=Courier+Prime:ital,wght@0,400;0,700;1,400;1,700&family=Share+Tech+Mono&display=swap',
   'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js',
