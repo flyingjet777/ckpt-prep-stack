@@ -47,6 +47,7 @@ const flightData = {
     etd: '',
     eta: '',
     flightDay: '',
+    flightDate: '',         // OFP FLIGHT RELEASE 줄의 완전한 날짜 "YYYY-MM-DD" (ON 29/MAY/26)
     depWeatherRaw: [],
     arrWeatherRaw: [],
     altnWeatherRaw: [],
@@ -176,22 +177,62 @@ function getPageTextWithNewlines(textContent) {
     return filteredLines.join('\n');
 }
 
-function getAirportOffset(icao) {
-    if (!icao) return 0;
-    const code = icao.toUpperCase();
-    if (code === 'RKSI' || code === 'RKSS') return 9;
-    if (code === 'KLAX') return -7;
-    if (code === 'KJFK') return -4;
-    return 0; // Default to UTC
-}
+// 공항 → IANA 타임존 맵 (아시아나 A380 취항지·예비공항·EDTO 공항 위주)
+// 고정 오프셋 대신 IANA 존을 쓰면 서머타임이 자동 반영된다.
+const AIRPORT_TIMEZONES = {
+    // 한국
+    RKSI: 'Asia/Seoul', RKSS: 'Asia/Seoul', RKPC: 'Asia/Seoul', RKTU: 'Asia/Seoul', RKPK: 'Asia/Seoul',
+    // 미국 본토·하와이·알래스카
+    KLAX: 'America/Los_Angeles', KSFO: 'America/Los_Angeles', KONT: 'America/Los_Angeles',
+    KOAK: 'America/Los_Angeles', KSEA: 'America/Los_Angeles',
+    KJFK: 'America/New_York', KBOS: 'America/New_York', KIAD: 'America/New_York',
+    KPHL: 'America/New_York', KZNY: 'America/New_York',
+    KORD: 'America/Chicago', KMSP: 'America/Chicago', KDTW: 'America/Detroit',
+    PHNL: 'Pacific/Honolulu',
+    PANC: 'America/Anchorage', PACD: 'America/Anchorage', PAFA: 'America/Anchorage',
+    PAKN: 'America/Anchorage', PAKT: 'America/Sitka',
+    // 캐나다
+    CYVR: 'America/Vancouver', CYYZ: 'America/Toronto', CYUL: 'America/Toronto',
+    CYEG: 'America/Edmonton', CYYC: 'America/Edmonton', CYWG: 'America/Winnipeg',
+    // 일본
+    RJAA: 'Asia/Tokyo', RJTT: 'Asia/Tokyo', RJBB: 'Asia/Tokyo', RJCC: 'Asia/Tokyo',
+    RJSS: 'Asia/Tokyo', RJGG: 'Asia/Tokyo', ROAH: 'Asia/Tokyo',
+};
 
-function getLocalTimeStr(utcTimeStr, offset) {
-    if (!utcTimeStr) return '';
+// UTC "HH:MM" → 해당 공항 현지시각 "HH:MM L".
+// flightData.flightDate(OFP 날짜)를 기준으로 Intl API가 서머타임까지 처리.
+// 모르는 공항이면 '' 반환 — 틀린 시각을 참처럼 표시하지 않기 위함 (호출부에서 '----' 폴백).
+function getLocalTimeStr(utcTimeStr, icao, dayOffset = 0) {
+    if (!utcTimeStr || !icao) return '';
+    const tz = AIRPORT_TIMEZONES[icao.toUpperCase()];
+    if (!tz) return '';
     const [h, m] = utcTimeStr.split(':').map(Number);
     if (isNaN(h) || isNaN(m)) return '';
-    let localHours = (h + offset) % 24;
-    if (localHours < 0) localHours += 24;
-    return String(localHours).padStart(2, '0') + ':' + String(m).padStart(2, '0') + ' L';
+
+    // OFP 날짜가 있으면 그 날짜 기준(서머타임 정확), 없으면 오늘 기준
+    let yyyy, mm, dd;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(flightData.flightDate || '')) {
+        [yyyy, mm, dd] = flightData.flightDate.split('-').map(Number);
+    } else {
+        const now = new Date();
+        yyyy = now.getUTCFullYear(); mm = now.getUTCMonth() + 1; dd = now.getUTCDate();
+    }
+    const utcDate = new Date(Date.UTC(yyyy, mm - 1, dd + dayOffset, h, m));
+    try {
+        const localStr = new Intl.DateTimeFormat('en-GB', {
+            timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false
+        }).format(utcDate);
+        return `${localStr} L`;
+    } catch {
+        return '';
+    }
+}
+
+// ETA가 ETD보다 작으면 자정을 넘긴 것 — 현지시각 계산 시 하루를 더해 서머타임 경계 오차 방지
+function getEtaDayOffset() {
+    const etd = flightData.etd, eta = flightData.eta;
+    if (!etd || !eta) return 0;
+    return eta < etd ? 1 : 0;
 }
 
 function getArrivalDay(depDay, depTime, arrTime) {
@@ -1469,35 +1510,64 @@ function buildMetarRows(metarObj, label) {
 //  GATE  —  AeroDataBox via RapidAPI
 // ══════════════════════════════════════════════════════════════════
 
-async function fetchGate() {
-    const fltNbr = (flightData.fltNbr || '').replace(/\s+/g, '').toUpperCase(); // "OZ202"
+const GATE_CACHE_MS = 10 * 60 * 1000; // 10분 — 같은 편/날짜는 재조회 안 함 (쿼터 절약)
+let gateFetchInFlight = false;
+let gateCacheKey = '';
+let gateCacheTime = 0;
+
+async function fetchGate(force = false) {
+    const fltNbr = (flightData.fltNbr || '').replace(/\s+/g, '').toUpperCase(); // "AAR224"
     const etdStr = flightData.etd || '';   // "03:40"
-    const depDay = flightData.flightDay || '';  // "07"
+    const dateStr = flightData.flightDate || '';  // "2026-05-29" (OFP 원문에서 파싱)
 
     if (!fltNbr || !etdStr) {
         console.warn('[GATE] fltNbr 또는 ETD 없음');
         return;
     }
+    // 완전한 날짜가 없으면 호출하지 않음 — 무효/틀린 날짜 조회는 쿼터만 소모
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+        console.warn('[GATE] flightDate 없음/무효 — 조회 생략:', dateStr);
+        flightData.gateStatus = 'done'; // buildGateLabel이 'N/A' 표시
+        return;
+    }
+
+    const cacheKey = `${fltNbr}|${dateStr}`;
+    if (!force && gateCacheKey === cacheKey && (Date.now() - gateCacheTime) < GATE_CACHE_MS) {
+        console.log('[GATE] Cache hit — skipping fetch');
+        return;
+    }
+    if (gateFetchInFlight) {
+        console.log('[GATE] 요청 진행 중 — 중복 호출 생략');
+        return;
+    }
+    gateFetchInFlight = true;
 
     flightData.gateStatus = 'loading';
     flightData.depGate = '';
     flightData.depTerminal = '';
 
-    // AeroDataBox: GET /flights/number/{flightNumber}/{date}  (via 공용 프록시 — 키는 서버에만 보관)
-    // date 형식: YYYY-MM-DD  (OFP flightDay가 DD형식이라 현재년월 붙임)
-    const today = new Date();
-    const yyyy  = today.getUTCFullYear();
-    const mm    = String(today.getUTCMonth() + 1).padStart(2, '0');
-    const dd    = depDay.padStart(2, '0');
-    const dateStr = `${yyyy}-${mm}-${dd}`;
-
-    const url = `${CKPT_PROXY_BASE}/gate?flightNumber=${fltNbr}&date=${dateStr}`;
+    const url = `${CKPT_PROXY_BASE}/gate?flightNumber=${encodeURIComponent(fltNbr)}&date=${encodeURIComponent(dateStr)}`;
     console.log('[GATE] Fetching:', url);
+
+    const gateWrap = document.getElementById('gate-box-wrap');
+    if (gateWrap) gateWrap.innerHTML = buildGateBoxHTML();
 
     try {
         const resp = await fetch(url);
+        if (resp.status === 429) {
+            // AeroDataBox 무료 쿼터(월 300유닛) 소진 — 다음 달 1일 리셋까지 조회 불가
+            flightData.gateStatus = 'quota';
+            if (gateWrap) {
+                gateWrap.innerHTML = buildGateBoxHTML();
+                document.getElementById('dep-gate-display')?.focus();
+            }
+            console.warn('[GATE] API 쿼터 소진 (429)');
+            return;
+        }
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const data = await resp.json();
+        gateCacheKey = cacheKey;
+        gateCacheTime = Date.now();
 
         // 응답은 배열 — ETD에 가장 가까운 편 선택
         const flights = Array.isArray(data) ? data : [data];
@@ -1525,20 +1595,21 @@ async function fetchGate() {
 
         console.log('[GATE] Done — Gate:', flightData.depGate, 'Terminal:', flightData.depTerminal);
 
-        // INIT 페이지가 열려 있으면 게이트 표시 즉시 갱신
-        const gateEl = document.getElementById('dep-gate-display');
-        if (gateEl) {
-            gateEl.textContent = buildGateLabel();
-            gateEl.style.color = flightData.depGate ? 'var(--text-green)' : '#666';
-            gateEl.style.borderColor = flightData.depGate ? 'var(--text-green)' : '#666';
+        // INIT 페이지가 열려 있으면 게이트 표시 즉시 갱신 (게이트 없으면 N/A → 직접입력 모드)
+        if (gateWrap) {
+            gateWrap.innerHTML = buildGateBoxHTML();
+            if (!flightData.depGate) document.getElementById('dep-gate-display')?.focus();
         }
 
     } catch (err) {
         console.error('[GATE] fetch 실패:', err);
         flightData.gateStatus = 'error';
-        flightData.depGate = 'ERR';
-        const gateEl = document.getElementById('dep-gate-display');
-        if (gateEl) { gateEl.textContent = 'ERR'; gateEl.style.color = '#ff6b6b'; gateEl.style.borderColor = '#ff6b6b'; }
+        if (gateWrap) {
+            gateWrap.innerHTML = buildGateBoxHTML();
+            document.getElementById('dep-gate-display')?.focus();
+        }
+    } finally {
+        gateFetchInFlight = false;
     }
 }
 
@@ -1546,10 +1617,37 @@ function buildGateLabel() {
     const g = flightData.depGate;
     const t = flightData.depTerminal;
     const s = flightData.gateStatus;
+    if (g) return t ? `T${t}  G${g}` : `G${g}`;
     if (s === 'loading') return '...';
-    if (!g && s === 'done') return 'N/A';
-    if (!g) return '---';
-    return t ? `T${t}  G${g}` : `G${g}`;
+    if (s === 'done') return 'N/A';
+    return 'GET'; // idle / quota / error — 아직 조회 안 함 또는 재시도 필요
+}
+
+// 게이트 정보를 성공적으로 받아오지 못하면(N/A·쿼터소진·에러) 직접 입력할 수 있는
+// 입력란으로 바뀐다. OFP를 다시 IMPORT하면 depGate/gateStatus가 리셋되어 GET 버튼으로 돌아온다.
+function buildGateBoxHTML() {
+    const g = flightData.depGate;
+    const s = flightData.gateStatus;
+
+    if (g) {
+        return `<button id="dep-gate-display" class="fms-btn-grey gate-num-btn"
+                        onclick="fetchGate(true);" title="탭하면 게이트 재조회"
+                        style="border-color: var(--text-green); color: var(--text-green);
+                               font-family:'Share Tech Mono',monospace;">${buildGateLabel()}</button>`;
+    }
+    if (s === 'idle' || s === 'loading') {
+        return `<button id="dep-gate-display" class="fms-btn-grey gate-num-btn"
+                        onclick="fetchGate(true);" title="탭하면 게이트 조회"
+                        style="border-color: var(--text-green); color: var(--text-green); border-width: 2.5px;
+                               box-shadow: 0 0 5px var(--text-green); font-weight: 700;
+                               font-family:'Share Tech Mono',monospace;">${s === 'loading' ? '...' : 'GET'}</button>`;
+    }
+    // done(N/A) / quota / error — 정보를 못 받아왔으니 직접 입력 (GET 버튼과 동일한 박스 크기/글씨 크기 유지)
+    return `<input type="text" id="dep-gate-display" class="gate-num-btn" data-field="depGate" value=""
+                    placeholder="직접입력" autofocus
+                    style="height: 28px; box-sizing: border-box; text-align:center; background:transparent;
+                           border: 2px solid var(--text-green); border-radius:4px;
+                           color: var(--text-green); font-family:'Share Tech Mono',monospace;">`;
 }
 
 // ── Rule filtering ───────────────────────────────────────────────
@@ -1971,7 +2069,11 @@ let cabinBriefingNotes = (() => {
 let cabinBriefingSecLevel = localStorage.getItem('ckpt_cabin_briefing_sec_level') || 'BLUE';
 
 function saveCabinBriefingNotes() {
-    localStorage.setItem('ckpt_cabin_briefing_notes', JSON.stringify(cabinBriefingNotes));
+    try {
+        localStorage.setItem('ckpt_cabin_briefing_notes', JSON.stringify(cabinBriefingNotes));
+    } catch (err) {
+        console.error('[BRIEFING] NOTES 저장 실패 (localStorage 용량 초과 가능):', err);
+    }
 }
 
 // --- Step Altitude Transition Data ---
@@ -2258,10 +2360,7 @@ function renderInitPage() {
                 </div>
                 <button class="fms-btn-grey route-sel-btn">RTE SEL</button>
                 <span style="color: var(--text-white); font-weight: 700; font-size: 0.8rem; margin-left: 8px;">GATE</span>
-                <button id="dep-gate-display" class="fms-btn-grey gate-num-btn"
-                        onclick="fetchGate();" title="탭하면 게이트 재조회"
-                        style="border-color: var(--text-green); color: var(--text-green);
-                               font-family:'Share Tech Mono',monospace;">${buildGateLabel()}</button>
+                <span id="gate-box-wrap">${buildGateBoxHTML()}</span>
             </div>
         </div>
 
@@ -3011,8 +3110,8 @@ function renderDepArrWxPage() {
                 <span class="text-white-fms">LOCAL</span>
                 <span style="color: var(--text-green); font-weight: bold;">
                     ${isDepActive
-                        ? (flightData.etd ? getLocalTimeStr(flightData.etd, getAirportOffset(flightData.from)) : '----')
-                        : (flightData.eta ? getLocalTimeStr(flightData.eta, getAirportOffset(flightData.to)) : '----')}
+                        ? (flightData.etd ? (getLocalTimeStr(flightData.etd, flightData.from) || '----') : '----')
+                        : (flightData.eta ? (getLocalTimeStr(flightData.eta, flightData.to, getEtaDayOffset()) || '----') : '----')}
                 </span>
             </div>
         </div>
@@ -3090,8 +3189,8 @@ function renderDepArrNotamPage() {
                 <span class="text-white-fms">LOCAL</span>
                 <span style="color: var(--text-green); font-weight: bold;">
                     ${isDepActive
-                        ? (flightData.etd ? getLocalTimeStr(flightData.etd, getAirportOffset(flightData.from)) : '----')
-                        : (flightData.eta ? getLocalTimeStr(flightData.eta, getAirportOffset(flightData.to)) : '----')}
+                        ? (flightData.etd ? (getLocalTimeStr(flightData.etd, flightData.from) || '----') : '----')
+                        : (flightData.eta ? (getLocalTimeStr(flightData.eta, flightData.to, getEtaDayOffset()) || '----') : '----')}
                 </span>
             </div>
         </div>
@@ -3348,7 +3447,7 @@ function renderEnrteNotamPage() {
                 </span>
                 <span class="text-white-fms">LOCAL</span>
                 <span style="color: var(--text-green); font-weight: bold;">
-                    ${flightData.eta ? getLocalTimeStr(flightData.eta, getAirportOffset(flightData.altn)) : '----'}
+                    ${flightData.eta ? (getLocalTimeStr(flightData.eta, flightData.altn, getEtaDayOffset()) || '----') : '----'}
                 </span>
                 ` : `
                 <span class="text-white-fms">EDTO NOTAM</span>
@@ -3525,7 +3624,7 @@ function renderEnrteWxPage() {
                 </span>
                 <span class="text-white-fms">LOCAL</span>
                 <span style="color: var(--text-green); font-weight: bold;">
-                    ${flightData.eta ? getLocalTimeStr(flightData.eta, getAirportOffset(flightData.to)) : '----'}
+                    ${flightData.eta ? (getLocalTimeStr(flightData.eta, flightData.to, getEtaDayOffset()) || '----') : '----'}
                 </span>
             </div>
         </div>
@@ -3628,7 +3727,11 @@ function renderRteSummaryPage() {
 }
 
 function saveMemoNotepadPages() {
-    localStorage.setItem('ckpt_memo_notepad_pages', JSON.stringify(memoNotepadPages));
+    try {
+        localStorage.setItem('ckpt_memo_notepad_pages', JSON.stringify(memoNotepadPages));
+    } catch (err) {
+        console.error('[MEMO] NOTEPAD 저장 실패 (localStorage 용량 초과 가능):', err);
+    }
 }
 
 function saveMemoDrawpadPages() {
@@ -4183,7 +4286,10 @@ const CREW_NOTES_DEFAULT_HTML = buildDefaultNotesHTML([
 ]);
 
 function getCabinBriefingNotesHTML(tabKey, defaultHTML) {
-    const html = cabinBriefingNotes[tabKey] || defaultHTML || '';
+    // 저장된 적이 있으면 빈 문자열('')이라도 그대로 존중 — ||를 쓰면 사용자가 지운 노트가 기본 문구로 부활함
+    const html = Object.prototype.hasOwnProperty.call(cabinBriefingNotes, tabKey)
+        ? cabinBriefingNotes[tabKey]
+        : (defaultHTML || '');
     return `
         <div style="margin-top: 8px; flex-grow: 1; display: flex; flex-direction: column; min-height: 60px;">
             <span style="color: var(--text-gray); font-size: 0.68rem; margin-bottom: 3px;">NOTES</span>
@@ -4201,8 +4307,8 @@ function getCabinBriefingContentHTML() {
     if (activeCabinBriefingTab === 'FLT') {
         const etdZ = flightData.etd ? flightData.etd.replace(':', '') + 'Z' : '---';
         const etaZ = flightData.eta ? flightData.eta.replace(':', '') + 'Z' : '---';
-        const etdLt = flightData.etd ? getLocalTimeStr(flightData.etd, getAirportOffset(flightData.from)) : '';
-        const etaLt = flightData.eta ? getLocalTimeStr(flightData.eta, getAirportOffset(flightData.to)) : '';
+        const etdLt = flightData.etd ? getLocalTimeStr(flightData.etd, flightData.from) : '';
+        const etaLt = flightData.eta ? getLocalTimeStr(flightData.eta, flightData.to, getEtaDayOffset()) : '';
         const roundedFltTime = getRoundedFltTimeStr();
         const fltTimeStr = roundedFltTime ? `${roundedFltTime} (${flightData.fltTime})` : '---';
         return `
@@ -5288,6 +5394,20 @@ if (fileInputEl) {
             matchedCount++;
         }
 
+        // 19b. FLIGHT DATE — "FLIGHT RELEASE AAR224 RKSI/KJFK ON 29/MAY/26" → "2026-05-29"
+        // 게이트 조회용 완전한 날짜. 연·월을 "오늘" 기준으로 조합하면 과거 OFP/월 경계에서
+        // 틀린 날짜를 조회하며 API 쿼터만 소모하므로 반드시 OFP 원문의 날짜를 쓴다.
+        const MONTH_ABBR = { JAN:'01', FEB:'02', MAR:'03', APR:'04', MAY:'05', JUN:'06',
+                             JUL:'07', AUG:'08', SEP:'09', OCT:'10', NOV:'11', DEC:'12' };
+        const fullDateMatch = fullText.match(/\bON\s+(\d{2})\/([A-Z]{3})\/(\d{2})\b/i);
+        if (fullDateMatch && MONTH_ABBR[fullDateMatch[2].toUpperCase()]) {
+            const dd = fullDateMatch[1];
+            const mm = MONTH_ABBR[fullDateMatch[2].toUpperCase()];
+            const yyyy = '20' + fullDateMatch[3];
+            flightData.flightDate = `${yyyy}-${mm}-${dd}`;
+            matchedCount++;
+        }
+
         // 20. WEATHER SECTIONS
         flightData.depWeatherRaw = extractWeatherSection(fullText, 'DEPARTURE WEATHER');
         flightData.arrWeatherRaw = extractWeatherSection(fullText, 'ARRIVAL WEATHER');
@@ -5306,9 +5426,12 @@ if (fileInputEl) {
         extractNotamPackage2(fullText);
         extractNotamPackage3(fullText);  // FIR NOTAM + AI 요약 트리거
 
-        // 실시간 데이터 fetch (METAR 15분 캐싱, 게이트 편명 기반)
+        // 실시간 데이터 fetch (METAR 15분 캐싱)
         fetchMetar();
-        fetchGate();
+        // GATE는 쿼터 절약을 위해 자동 조회하지 않음 — GET 버튼을 눌렀을 때만 조회
+        flightData.depGate = '';
+        flightData.depTerminal = '';
+        flightData.gateStatus = 'idle';
         if (flightData.depWeatherRaw.length > 0 || flightData.arrWeatherRaw.length > 0) {
             matchedCount++;
         }
