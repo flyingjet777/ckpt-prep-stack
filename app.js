@@ -2129,9 +2129,10 @@ function parseCrzWindData(fullText, fromAirport = '', toAirport = '') {
     // CMP may be encoded with either + or - in different OFP variants;
     // the display intentionally omits CMP and keeps WIND direction/speed + SAT.
     const valueRe = /(\d{3})(\d{2})[+-]\d{3}([+-]?\d{2})/g;
-    // Waypoint identifiers may be 3-5 letters (GTC, FATMO) or coordinate
-    // fixes (40E60, 45N70). FL/ISA/WIND header lines are excluded by length.
-    const waypointRe = /^(?:[A-Z]{3,5}|\d{2,3}[NESW]\d{1,3})(?:\s+(?:[A-Z]{3,5}|\d{2,3}[NESW]\d{1,3}))*$/;
+    // Waypoint identifiers may be 3-5 letters or several coordinate forms:
+    // 40E60, 45N70, 60N00, and compact 4880N (= 48N80).
+    const waypointToken = '(?:[A-Z]{3,5}|\\d{2,3}[NESW]\\d{1,3}|\\d{4,5}[NS])';
+    const waypointRe = new RegExp(`^${waypointToken}(?:\\s+${waypointToken})*$`);
 
     // In Jeppesen's summary layout the waypoint line is printed BELOW the
     // corresponding FL rows. Therefore hold one wind block and attach it
@@ -4246,13 +4247,17 @@ function isCrzWindStepAltMatch(rowIndex, colIndex) {
 function normalizeWaypointCoordinate(value) {
     const wpt = String(value || '').trim().toUpperCase();
     const full = wpt.match(/^(\d{2})([NS])(\d{3})([EW])$/);
-    if (!full) return wpt;
+    if (full) {
+        const lat = full[1];
+        const lon = Number(full[3]);
+        const hemi = full[4];
+        const compactLon = String(lon - 100);
+        return `${lat}${hemi === 'E' ? 'E' : 'N'}${compactLon}`;
+    }
 
-    const lat = full[1];
-    const lon = Number(full[3]);
-    const hemi = full[4];
-    const compactLon = String(lon - 100);
-    return `${lat}${hemi === 'E' ? 'E' : 'N'}${compactLon}`;
+    // Compact latitude/longitude form: 4880N means 48N80.
+    const compact = wpt.match(/^(\d{2})(\d{2,3})([NS])$/);
+    return compact ? `${compact[1]}${compact[3]}${compact[2]}` : wpt;
 }
 
 function parseCrzWindValue(value) {
