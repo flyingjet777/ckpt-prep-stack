@@ -104,6 +104,7 @@ function resetFlightData() {
     stepAltScrollIndex = 0;
     crzWindData = [];
     crzWindScrollIndex = 0;
+    crzWindLevels = ['FL330', 'FL350', 'FL370', 'FL390'];
 }
 
 // --- Computed Values ---
@@ -2088,17 +2089,43 @@ let stepAltScrollIndex = 0;
 // CRZ WIND — rebuilt from the current OFP on every PDF import.
 let crzWindData = [];
 let crzWindScrollIndex = 0;
+let crzWindLevels = ['FL330', 'FL350', 'FL370', 'FL390'];
 
-function parseCrzWindData(fullText) {
+function parseCrzWindData(fullText, fromAirport = '', toAirport = '') {
     // Route text after the summary title varies by OFP (e.g. ICN-LAX,
     // other city pairs), so only match the stable title prefix.
     const start = fullText.search(/START OF WIND AND TEMPERATURE SUMMARY/i);
     if (start < 0) return [];
-    const endMatch = fullText.slice(start).search(/DRIFTDOWN SUMMARY DATA/i);
-    const section = fullText.slice(start, endMatch >= 0 ? start + endMatch : undefined);
+    const afterStart = fullText.slice(start);
+    const endCandidates = [
+        afterStart.search(/DISPATCH RELEASE INFORMATION/i),
+        afterStart.search(/DRIFTDOWN SUMMARY DATA/i),
+        afterStart.search(/END OF JEPPESEN DATAPLAN/i)
+    ].filter(index => index >= 0);
+    const endOffset = endCandidates.length ? Math.min(...endCandidates) : afterStart.length;
+    const section = afterStart.slice(0, endOffset);
     const lines = section.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
     const result = [];
-    const levelRe = /^(330|350|370|390)\s+[-+]?\d{2}\s+(.+)$/;
+    const availableLevels = [...new Set(lines
+        .map(line => line.match(/^(\d{3})\s+[-+]?\d{2}\s+/)?.[1])
+        .filter(Boolean))];
+    const oddLevels = ['330', '350', '370', '390'];
+    const evenLevels = ['320', '340', '360', '380'];
+    const airportLongitudes = {
+        RKSI: 126.45, KLAX: -118.41, KJFK: -73.78, KONT: -117.60,
+        RJCC: 141.69, RJTT: 139.78, RJBB: 135.24, PANC: -149.99,
+        KSFO: -122.38, PHNL: -157.86
+    };
+    const fromLon = airportLongitudes[String(fromAirport).toUpperCase()];
+    const toLon = airportLongitudes[String(toAirport).toUpperCase()];
+    const eastbound = fromLon != null && toLon != null
+        ? ((((toLon - fromLon) + 540) % 360) - 180) > 0
+        : availableLevels.some(level => oddLevels.includes(level));
+    const preferredLevels = eastbound ? oddLevels : evenLevels;
+    const selectedLevels = preferredLevels.filter(level => availableLevels.includes(level));
+    crzWindLevels = selectedLevels.length === 4 ? selectedLevels.map(level => `FL${level}`) :
+        availableLevels.slice(0, 4).map(level => `FL${level}`);
+    const levelRe = new RegExp(`^(${crzWindLevels.map(level => level.slice(2)).join('|')})\\s+[-+]?\\d{2}\\s+(.+)$`);
     // CMP may be encoded with either + or - in different OFP variants;
     // the display intentionally omits CMP and keeps WIND direction/speed + SAT.
     const valueRe = /(\d{3})(\d{2})[+-]\d{3}([+-]?\d{2})/g;
@@ -2124,10 +2151,10 @@ function parseCrzWindData(fullText) {
             waypoints.forEach((wpt, index) => {
                 result.push([
                     wpt,
-                    byLevel['330']?.[index] || '---',
-                    byLevel['350']?.[index] || '---',
-                    byLevel['370']?.[index] || '---',
-                    byLevel['390']?.[index] || '---'
+                    byLevel[crzWindLevels[0].slice(2)]?.[index] || '---',
+                    byLevel[crzWindLevels[1].slice(2)]?.[index] || '---',
+                    byLevel[crzWindLevels[2].slice(2)]?.[index] || '---',
+                    byLevel[crzWindLevels[3].slice(2)]?.[index] || '---'
                 ]);
             });
         }
@@ -4201,7 +4228,7 @@ function getCrzWindTableHTML() {
 function isCrzWindStepAltMatch(rowIndex, colIndex) {
     const windWpt = normalizeWaypointCoordinate(crzWindData[rowIndex]?.[0]);
     if (!windWpt) return false;
-    const windFl = ['FL330', 'FL350', 'FL370', 'FL390'][colIndex];
+    const windFl = crzWindLevels[colIndex];
 
     // The first CRZ ALT comes from the first valid STEP ALT entry, rather
     // than being assumed to be FL330.
@@ -4292,10 +4319,7 @@ function renderCrzWindPage() {
             <div style="font-size:.82rem; margin-bottom:6px; font-weight:bold; color:#fff;">CRZ WIND / SAT</div>
             <div style="display:grid; grid-template-columns:1.05fr 1fr 1fr 1fr 1fr; gap:4px; align-items:center; font-size:.68rem; font-weight:bold;">
                 <div style="color:var(--text-gray);">WPT</div>
-                <div style="color:var(--text-cyan); text-align:center;">FL330</div>
-                <div style="color:var(--text-cyan); text-align:center;">FL350</div>
-                <div style="color:var(--text-cyan); text-align:center;">FL370</div>
-                <div style="color:var(--text-cyan); text-align:center;">FL390</div>
+                ${crzWindLevels.map(level => `<div style="color:var(--text-cyan); text-align:center;">${level}</div>`).join('')}
             </div>
             <div id="crz-wind-grid" style="display:grid; grid-template-columns:1.05fr 1fr 1fr 1fr 1fr; gap:4px; align-items:center; font-size:.68rem; line-height:1.55; margin-top:4px;">
                 ${getCrzWindTableHTML()}
@@ -5336,11 +5360,6 @@ if (fileInputEl) {
             setProgress(Math.round(40 + (i / numPages) * 45));
         }
 
-        // Rebuild CRZ WIND from this OFP on every import. The previous
-        // flight's wind data was cleared by resetFlightData() above.
-        crzWindData = parseCrzWindData(fullText);
-        crzWindScrollIndex = 0;
-
         setProgress(90);
 
         // --- Extract values: patterns match the Asiana CFP (OFP page 1) format. ---
@@ -5365,6 +5384,11 @@ if (fileInputEl) {
             flightData.to = routeMatch[2].toUpperCase();
             matchedCount++;
         }
+
+        // Rebuild CRZ WIND from the first WIND SUMMARY in this OFP after the
+        // route is known, so the eastbound/westbound altitude set is selected.
+        crzWindData = parseCrzWindData(fullText, flightData.from, flightData.to);
+        crzWindScrollIndex = 0;
 
         // 3. ALTN — "ALTN/RKSS 0092 00.17"  (also captures ALTN fuel and time)
         const altnMatch = fullText.match(/ALTN\s*\/\s*([A-Z]{4})\s+(\d{3,5})\s+(\d{2})\s*[:\.]\s*(\d{2})/i) ||
