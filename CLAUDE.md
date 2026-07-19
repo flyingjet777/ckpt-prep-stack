@@ -209,8 +209,17 @@ for (let i = 0; i < lines.length; i++) {
 ### 현재 커밋 상태
 
 - `dev`: `c659093` — Add OFP CRZ WIND data workflow
-- `main`: `e29a157` — Merge dev into main
-- 2026-07-20 인수인계 문서 커밋은 이후 생성 예정
+- `main`: `5e4da06` — Refresh cache for directional wind parser
+- 인수인계 문서: `WORKNOTE_2026-07-20.md`
+
+### 2026-07-20 최종 코드 검토
+
+- `app.js` 문법 검사 및 `git diff --check` 통과
+- WIND sample 하드코딩 제거; PDF IMPORT 결과만 사용
+- TAF 반환값에 WIND 중복 제거 로직이 섞이지 않도록 분리 확인
+- 최신 WIND 파서는 첫 SUMMARY부터 `DISPATCH RELEASE INFORMATION` 이전까지만 읽음
+- 동쪽/서쪽 운항별 고도 세트와 페이지 경계 처리를 반영
+- 정적 파일 캐시 버전: `app.js?v=94`, service worker `a380-mfd-v37`
 
 ## 10. 작업 시 주의사항
 
