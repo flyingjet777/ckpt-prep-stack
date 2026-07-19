@@ -4251,8 +4251,12 @@ function normalizeWaypointCoordinate(value) {
         const lat = full[1];
         const lon = Number(full[3]);
         const hemi = full[4];
-        const compactLon = String(lon - 100);
-        return `${lat}${hemi === 'E' ? 'E' : 'N'}${compactLon}`;
+        if (hemi === 'W') {
+            // 48N080W -> 48N80; 65N160W -> 65N60.
+            return `${lat}N${lon >= 100 ? lon - 100 : lon}`;
+        }
+        // 37N170E -> 37E70; 37N180E -> 37E80.
+        return `${lat}E${lon - 100}`;
     }
 
     // Compact latitude/longitude form: 4880N means 48N80.
