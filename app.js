@@ -4249,19 +4249,26 @@ function normalizeWaypointCoordinate(value) {
     const full = wpt.match(/^(\d{2})([NS])(\d{3})([EW])$/);
     if (full) {
         const lat = full[1];
+        const latHemi = full[2];
         const lon = Number(full[3]);
-        const hemi = full[4];
-        if (hemi === 'W') {
-            // 48N080W -> 48N80; 65N160W -> 65N60.
-            return `${lat}N${lon >= 100 ? lon - 100 : lon}`;
+        const lonHemi = full[4];
+        const lonShort = lon >= 100 ? String(lon - 100) : String(lon).padStart(2, '0');
+
+        // ARINC 424 quadrant rules:
+        // N/W<100 -> 5040N, N/W>=100 -> 30N60
+        // N/E<100 -> 5020E, N/E>=100 -> 50E20
+        // S/W<100 -> 5275W, S/W>=100 -> 52W20
+        // S/E<100 -> 6030S, S/E>=100 -> 60S30
+        if (latHemi === 'N') {
+            if (lonHemi === 'W') return lon >= 100 ? `${lat}N${lonShort}` : `${lat}${lonShort}N`;
+            return lon >= 100 ? `${lat}E${lonShort}` : `${lat}${lonShort}E`;
         }
-        // 37N170E -> 37E70; 37N180E -> 37E80.
-        return `${lat}E${lon - 100}`;
+        if (lonHemi === 'W') return lon >= 100 ? `${lat}W${lonShort}` : `${lat}${lonShort}W`;
+        return lon >= 100 ? `${lat}S${lonShort}` : `${lat}${lonShort}S`;
     }
 
-    // Compact latitude/longitude form: 4880N means 48N80.
-    const compact = wpt.match(/^(\d{2})(\d{2,3})([NS])$/);
-    return compact ? `${compact[1]}${compact[3]}${compact[2]}` : wpt;
+    // Already compact ARINC 424 forms (e.g. 47N30, 4880N, 52W20).
+    return wpt;
 }
 
 function parseCrzWindValue(value) {
