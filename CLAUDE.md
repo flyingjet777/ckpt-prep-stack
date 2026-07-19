@@ -199,6 +199,8 @@ for (let i = 0; i < lines.length; i++) {
 - PDF IMPORT마다 WIND DATA를 새로 파싱하고, reset 시 이전 데이터를 삭제
 - OFP 노선명과 관계없이 summary 제목을 인식하며, 3~5글자 및 좌표 waypoint를 처리
 - 좌표 표기 정규화: `65N160W=65N60`, `37N170E=37E70`, `37N180E=37E80`
+- ARINC 424 WGS84 사분면 규칙은 `WIND_DATA.md`의 참조표와 `normalizeWaypointCoordinate()`를 함께 확인할 것
+- 원문 예시 `52S160W=52W20`은 `경도-100` 계산과 불일치하므로 변경 전 확인 필요
 - STEP ALT waypoint와 고도가 일치하는 CRZ WIND 고도 셀은 그린색
 - 그 외 WIND 색상 규칙: 방향 30° 이상, 속도 30kt 이상, SAT 5°C 이상 변화 시 시안색; 범위 내는 흰색
 - 방향/속도/SAT 기준값은 각각 독립적으로 갱신
