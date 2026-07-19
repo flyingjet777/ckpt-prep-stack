@@ -4257,7 +4257,7 @@ function normalizeWaypointCoordinate(value) {
         // ARINC 424 quadrant rules:
         // N/W<100 -> 5040N, N/W>=100 -> 30N60
         // N/E<100 -> 5020E, N/E>=100 -> 50E20
-        // S/W<100 -> 5275W, S/W>=100 -> 52W20
+        // S/W<100 -> 5275W, S/W>=100 -> 52W60 (e.g. 52S160W)
         // S/E<100 -> 6030S, S/E>=100 -> 60S30
         if (latHemi === 'N') {
             if (lonHemi === 'W') return lon >= 100 ? `${lat}N${lonShort}` : `${lat}${lonShort}N`;
@@ -4267,7 +4267,7 @@ function normalizeWaypointCoordinate(value) {
         return lon >= 100 ? `${lat}S${lonShort}` : `${lat}${lonShort}S`;
     }
 
-    // Already compact ARINC 424 forms (e.g. 47N30, 4880N, 52W20).
+    // Already compact ARINC 424 forms (e.g. 47N30, 4880N, 52W60).
     return wpt;
 }
 
