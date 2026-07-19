@@ -102,6 +102,8 @@ function resetFlightData() {
     stepAltData.push({ wpt: '--------', alt: '---', dist: '', time: '' });
     stepAltData.push({ wpt: '--------', alt: '---', dist: '', time: '' });
     stepAltScrollIndex = 0;
+    crzWindData = [];
+    crzWindScrollIndex = 0;
 }
 
 // --- Computed Values ---
@@ -2083,6 +2085,58 @@ const stepAltData = [
 ];
 let stepAltScrollIndex = 0;
 
+// CRZ WIND — rebuilt from the current OFP on every PDF import.
+let crzWindData = [];
+let crzWindScrollIndex = 0;
+
+function parseCrzWindData(fullText) {
+    // Route text after the summary title varies by OFP (e.g. ICN-LAX,
+    // other city pairs), so only match the stable title prefix.
+    const start = fullText.search(/START OF WIND AND TEMPERATURE SUMMARY/i);
+    if (start < 0) return [];
+    const endMatch = fullText.slice(start).search(/DRIFTDOWN SUMMARY DATA/i);
+    const section = fullText.slice(start, endMatch >= 0 ? start + endMatch : undefined);
+    const lines = section.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+    const result = [];
+    const levelRe = /^(330|350|370|390)\s+[-+]?\d{2}\s+(.+)$/;
+    // CMP may be encoded with either + or - in different OFP variants;
+    // the display intentionally omits CMP and keeps WIND direction/speed + SAT.
+    const valueRe = /(\d{3})(\d{2})[+-]\d{3}([+-]?\d{2})/g;
+    // Waypoint identifiers may be 3-5 letters (GTC, FATMO) or coordinate
+    // fixes (40E60, 45N70). FL/ISA/WIND header lines are excluded by length.
+    const waypointRe = /^(?:[A-Z]{3,5}|\d{2,3}[NESW]\d{1,3})(?:\s+(?:[A-Z]{3,5}|\d{2,3}[NESW]\d{1,3}))*$/;
+
+    // In Jeppesen's summary layout the waypoint line is printed BELOW the
+    // corresponding FL rows. Therefore hold one wind block and attach it
+    // when the following waypoint line is encountered.
+    let byLevel = {};
+    for (const line of lines) {
+        const match = line.match(levelRe);
+        if (match) {
+            const values = [...match[2].matchAll(valueRe)].map(m => `${m[1]}/${m[2].padStart(3, '0')} ${m[3]}`);
+            if (values.length) byLevel[match[1]] = values;
+            continue;
+        }
+        if (!waypointRe.test(line)) continue;
+
+        const waypoints = line.split(/\s+/);
+        if (Object.keys(byLevel).length > 0) {
+            waypoints.forEach((wpt, index) => {
+                result.push([
+                    wpt,
+                    byLevel['330']?.[index] || '---',
+                    byLevel['350']?.[index] || '---',
+                    byLevel['370']?.[index] || '---',
+                    byLevel['390']?.[index] || '---'
+                ]);
+            });
+        }
+        byLevel = {};
+    }
+    // Some OFPs repeat the dataplan pages later in the document.
+    return [...new Map(result.map(row => [row[0], row])).values()];
+}
+
 // --- MEL/CDL Data ---
 let melCdlScrollIndex = 0;
 let activeMelCdlTab = 'MEL'; // 'MEL' or 'CREW'
@@ -2462,7 +2516,7 @@ function renderInitPage() {
                 <button class="fms-btn-grey align-target-btn btn-era-fir-notam-trigger" style="border-color: #ffffff; color: #ffffff;">ERA/FIR NOTAM</button>
             </div>
             <div class="bottom-aligned-row">
-                <button class="fms-btn-grey align-target-btn btn-step-alts-trigger" style="border-color: #ffffff; color: #ffffff;">STEP ALT</button>
+                <button class="fms-btn-grey align-target-btn btn-step-alts-trigger" style="border-color: #ffffff; color: #ffffff;">STEP ALT/WIND</button>
                 <button class="fms-btn-grey align-target-btn btn-crew-briefing-trigger" style="border-color: #ffffff; color: #ffffff; font-size: 0.62rem; white-space: nowrap;">CABIN BRIEFING</button>
             </div>
         </div>
@@ -3906,8 +3960,8 @@ function renderFuelLoadPage() {
                 </div>
                 <div class="cell-right" style="gap: 6px;">
                     <span class="fms-label label-right" style="width: 80px; text-align: right;">ZFWCG</span>
-                    <div class="fms-val-box white-text" style="width: 120px;">
-                        <input type="text" value="${flightData.zfwcg}" data-field="zfwcg">
+                    <div class="fms-val-box" style="width: 120px;">
+                        <input type="text" value="${flightData.zfwcg || '36.5%'}" data-field="zfwcg" style="color: var(--text-cyan); font-size: inherit;">
                     </div>
                 </div>
             </div>
@@ -3980,8 +4034,8 @@ function renderFuelLoadPage() {
                     <div class="fms-val-box extracted-value" style="width: 100px;">
                         <input type="text" value="${flightData.rteRsv}" data-field="rteRsv">
                     </div>
-                    <div class="fms-val-box white-text" style="width: 80px;">
-                        <input type="text" value="${flightData.rteRsvPct}" data-field="rteRsvPct">
+                    <div class="fms-val-box" style="width: 80px;">
+                        <input type="text" value="${flightData.rteRsvPct}" data-field="rteRsvPct" style="color: var(--text-cyan); font-size: inherit;">
                     </div>
                 </div>
                 <div class="cell-right" style="gap: 6px;">
@@ -4082,11 +4136,11 @@ function renderStepAltsPage() {
     mainContent.innerHTML = `
         <!-- Folder Tabs -->
         <div class="fms-tabs" style="margin-bottom: 6px;">
-            <div class="fms-tab">RTA</div>
+            <div class="fms-tab" id="tab-crz-wind" style="border-width:2px;">CRZ WIND</div>
             <div class="fms-tab">SPD</div>
             <div class="fms-tab">CMS</div>
             <div class="fms-tab">ALT</div>
-            <div class="fms-tab active">STEP ALTs</div>
+            <div class="fms-tab active" id="tab-step-alts" style="border-width:2px;">STEP ALT</div>
         </div>
 
         <!-- Table Container matching the reference image layout -->
@@ -4125,6 +4179,137 @@ function renderStepAltsPage() {
         </div>
     `;
     updateStepAltsTableOnly();
+}
+
+function getCrzWindTableHTML() {
+    const visibleRows = crzWindData.slice(crzWindScrollIndex, crzWindScrollIndex + 10);
+    if (!visibleRows.length) return `<div style="grid-column:1/-1; color:#666; text-align:center; padding:10px;">데이터 없음</div>`;
+    return visibleRows.map((row, visibleIndex) => {
+        const rowIndex = crzWindScrollIndex + visibleIndex;
+        return `
+        <div style="color:var(--text-green); font-weight:bold; text-align:left; font-size:.8rem; padding:2px 0 5px; border-bottom:1px solid #3a3f49;">${row[0]}</div>
+        ${row.slice(1).map((v, colIndex) => {
+            const color = isCrzWindStepAltMatch(rowIndex, colIndex)
+                ? 'var(--text-green)'
+                : (isCrzWindHighlighted(rowIndex, colIndex) ? 'var(--text-cyan)' : '#fff');
+            return `<div style="color:${color}; text-align:center; white-space:pre; font-size:.8rem; padding:2px 0 5px; border-bottom:1px solid #3a3f49;">${v}</div>`;
+        }).join('')}
+    `;
+    }).join('');
+}
+
+function isCrzWindStepAltMatch(rowIndex, colIndex) {
+    const windWpt = normalizeWaypointCoordinate(crzWindData[rowIndex]?.[0]);
+    if (!windWpt) return false;
+    const windFl = ['FL330', 'FL350', 'FL370', 'FL390'][colIndex];
+
+    // The first CRZ ALT comes from the first valid STEP ALT entry, rather
+    // than being assumed to be FL330.
+    const firstStepAlt = (stepAltData || []).find(item => /^FL\d+$/.test(String(item.alt || '').trim().toUpperCase()));
+    if (rowIndex === 0 && firstStepAlt && windFl === String(firstStepAlt.alt).trim().toUpperCase()) return true;
+
+    return (stepAltData || []).some(item =>
+        normalizeWaypointCoordinate(item.wpt) === windWpt &&
+        String(item.alt || '').trim().toUpperCase() === windFl
+    );
+}
+
+// OFP coordinate waypoint normalization for STEP ALT ↔ CRZ WIND matching.
+// Examples: 65N160W → 65N60, 37N170E → 37E70, 37N180E → 37E80.
+function normalizeWaypointCoordinate(value) {
+    const wpt = String(value || '').trim().toUpperCase();
+    const full = wpt.match(/^(\d{2})([NS])(\d{3})([EW])$/);
+    if (!full) return wpt;
+
+    const lat = full[1];
+    const lon = Number(full[3]);
+    const hemi = full[4];
+    const compactLon = String(lon - 100);
+    return `${lat}${hemi === 'E' ? 'E' : 'N'}${compactLon}`;
+}
+
+function parseCrzWindValue(value) {
+    const match = String(value || '').match(/^(\d{3})\/(\d{2,3})\s+([+-]?\d{2})$/);
+    return match ? { dir: Number(match[1]), speed: Number(match[2]), sat: Number(match[3]) } : null;
+}
+
+function isCrzWindHighlighted(rowIndex, colIndex) {
+    let baseline = null;
+    let highlighted = false;
+
+    // Compare waypoint-by-waypoint. Once a value exceeds a threshold, it is
+    // highlighted and becomes the new baseline for the following waypoints.
+    for (let i = 0; i <= rowIndex; i++) {
+        const current = parseCrzWindValue(crzWindData[i]?.[colIndex + 1]);
+        if (!current) continue;
+        if (!baseline) {
+            baseline = { dir: current.dir, speed: current.speed, sat: current.sat };
+            highlighted = true;
+            continue;
+        }
+
+        const rawDirDiff = Math.abs(current.dir - baseline.dir);
+        const dirDiff = Math.min(rawDirDiff, 360 - rawDirDiff);
+        const directionExceeded = dirDiff >= 30;
+        const speedExceeded = Math.abs(current.speed - baseline.speed) >= 30;
+        const temperatureExceeded = Math.abs(current.sat - baseline.sat) >= 5;
+        const exceedsRange = directionExceeded || speedExceeded || temperatureExceeded;
+
+        highlighted = i === rowIndex && exceedsRange;
+        // Keep independent baselines: a direction change must not reset the
+        // speed or SAT reference, and vice versa.
+        if (directionExceeded) baseline.dir = current.dir;
+        if (speedExceeded) baseline.speed = current.speed;
+        if (temperatureExceeded) baseline.sat = current.sat;
+    }
+    return highlighted;
+}
+
+function updateCrzWindTableOnly() {
+    const grid = document.querySelector('#crz-wind-grid');
+    if (grid) grid.innerHTML = getCrzWindTableHTML();
+}
+
+function renderCrzWindPage() {
+    const titleBar = document.querySelector('.page-title-bar');
+    if (titleBar) {
+        titleBar.style.backgroundColor = '#111419';
+        titleBar.style.color = '#ffffff';
+        titleBar.style.borderBottom = '1.5px solid #2f3542';
+    }
+    pageTitleText.innerHTML = `<span style="color:#fff; font-weight:bold;">ACTIVE/F-PLN/VERT REV</span>`;
+    btnInit.classList.remove('active');
+
+    mainContent.innerHTML = `
+        <div class="fms-tabs" style="margin-bottom:6px;">
+            <div class="fms-tab active" style="border-width:2px;">CRZ WIND</div>
+            <div class="fms-tab">SPD</div>
+            <div class="fms-tab">CMS</div>
+            <div class="fms-tab">ALT</div>
+            <div class="fms-tab" id="tab-step-alts" style="border-width:2px;">STEP ALT</div>
+        </div>
+        <div class="step-alt-table-container" style="border:1.5px solid #2f3542; border-radius:4px; padding:8px 10px; background-color:#12141a; margin-bottom:4px;">
+            <div style="font-size:.82rem; margin-bottom:6px; font-weight:bold; color:#fff;">CRZ WIND / SAT</div>
+            <div style="display:grid; grid-template-columns:1.05fr 1fr 1fr 1fr 1fr; gap:4px; align-items:center; font-size:.68rem; font-weight:bold;">
+                <div style="color:var(--text-gray);">WPT</div>
+                <div style="color:var(--text-cyan); text-align:center;">FL330</div>
+                <div style="color:var(--text-cyan); text-align:center;">FL350</div>
+                <div style="color:var(--text-cyan); text-align:center;">FL370</div>
+                <div style="color:var(--text-cyan); text-align:center;">FL390</div>
+            </div>
+            <div id="crz-wind-grid" style="display:grid; grid-template-columns:1.05fr 1fr 1fr 1fr 1fr; gap:4px; align-items:center; font-size:.68rem; line-height:1.55; margin-top:4px;">
+                ${getCrzWindTableHTML()}
+            </div>
+        </div>
+        <div style="display:flex; justify-content:center; gap:8px; margin-bottom:4px;">
+            <button class="fms-btn-grey fms-btn-scroll" id="btn-crz-wind-scroll-down" style="width:38px; height:28px; font-size:.65rem; padding:2px;">▼▼</button>
+            <button class="fms-btn-grey fms-btn-scroll" id="btn-crz-wind-scroll-up" style="width:38px; height:28px; font-size:.65rem; padding:2px;">▲▲</button>
+        </div>
+        <div style="color:var(--text-gray); font-size:.66rem; text-align:center; margin-top:4px;">WIND/SAT · OFP ${flightData.from || '----'} TO ${flightData.to || '----'}</div>
+        <div class="fms-row" style="margin-top:auto; padding-bottom:2px; justify-content:flex-start; align-items:flex-end;">
+            <button class="msg-btn btn-return" id="btn-return" style="height:28px; width:55px; font-size:.68rem; padding:2px; border:1.5px solid #fff !important;">RETURN</button>
+        </div>
+    `;
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -4652,6 +4837,26 @@ document.body.addEventListener('click', (e) => {
         renderStepAltsPage();
     }
 
+    // CRZ WIND page from the renamed RTA tab
+    if (e.target.closest('#tab-crz-wind')) {
+        crzWindScrollIndex = 0;
+        renderCrzWindPage();
+    }
+
+    if (e.target.closest('#tab-step-alts')) {
+        renderStepAltsPage();
+    }
+
+    if (e.target.closest('#btn-crz-wind-scroll-down')) {
+        crzWindScrollIndex = Math.min(crzWindScrollIndex + 10, Math.max(0, crzWindData.length - 10));
+        updateCrzWindTableOnly();
+    }
+
+    if (e.target.closest('#btn-crz-wind-scroll-up')) {
+        crzWindScrollIndex = Math.max(0, crzWindScrollIndex - 10);
+        updateCrzWindTableOnly();
+    }
+
     // CABIN BRIEFING trigger from INIT page
     if (e.target.closest('.btn-crew-briefing-trigger')) {
         renderCabinBriefingPage();
@@ -5131,6 +5336,11 @@ if (fileInputEl) {
             setProgress(Math.round(40 + (i / numPages) * 45));
         }
 
+        // Rebuild CRZ WIND from this OFP on every import. The previous
+        // flight's wind data was cleared by resetFlightData() above.
+        crzWindData = parseCrzWindData(fullText);
+        crzWindScrollIndex = 0;
+
         setProgress(90);
 
         // --- Extract values: patterns match the Asiana CFP (OFP page 1) format. ---
@@ -5276,7 +5486,7 @@ if (fileInputEl) {
         const cargoMatch = fullText.match(/CARGO\s*:\s*(\d+)\s*LBS/i);
         if (cargoMatch) {
             const cargoTons = (parseInt(cargoMatch[1], 10) / 2000).toFixed(1);
-            flightData.cargoTons = cargoTons.padStart(4, '0') + ' T';
+            flightData.cargoTons = cargoTons + ' T';
             matchedCount++;
         }
 

@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>A380 Joint Briefing System</title>
+    <link rel="manifest"
+        href="data:application/manifest+json,{%22name%22:%22A380%20Joint%20Briefing%22,%22short_name%22:%22A380Briefing%22,%22start_url%22:%22.%22,%22display%22:%22standalone%22,%22background_color%22:%22#121212%22,%22theme_color%22:%22#00A8E8%22}">
+    <style>
+        :root {
+            --bg-color: #121212;
+            --card-bg: #1E1E1E;
+            --text-color: #E0E0E0;
+            --accent-cyan: #00A8E8;
+            --accent-amber: #FFB300;
+            --border-color: #333333;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* 헤더 영역 */
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding-bottom: 15px;
+            border-bottom: 2px solid var(--border-color);
+        }
+
+        header h1 {
+            color: var(--accent-cyan);
+            font-size: 1.5rem;
+        }
+
+        .status-badge {
+            background: #222;
+            border: 1px solid var(--border-color);
+            padding: 5px 10px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+        }
+
+        /* 내비게이션 탭 (슬라이드 제어) */
+        .tabs {
+            display: flex;
+            margin: 15px 0;
+            gap: 10px;
+        }
+
+        .tab-btn {
+            flex: 1;
+            padding: 12px;
+            background: #252525;
+            border: 1px solid var(--border-color);
+            color: var(--text-color);
+            font-weight: bold;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: 0.2s;
+        }
+
+        .tab-btn.active {
+            background: var(--accent-cyan);
+            color: #000;
+            border-color: var(--accent-cyan);
+        }
+
+        /* 메인 콘텐츠 컨테이너 */
+        .content-container {
+            flex: 1;
+            overflow-y: auto;
+            position: relative;
+        }
+
+        .page {
+            display: none;
+            height: 100%;
+        }
+
+        .page.active {
+            display: block;
+        }
+
+        /* 그리드 및 카드 레이아웃 */
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .card {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 15px;
+        }
+
+        .card h2 {
+            font-size: 1.1rem;
+            margin-bottom: 12px;
+            padding-bottom: 5px;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .card.cyan h2 {
+            color: var(--accent-cyan);
+        }
+
+        .card.amber h2 {
+            color: var(--accent-amber);
+        }
+
+        /* 빈 버튼 및 데이터 입력 템플릿 스타일 */
+        .item-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+            font-size: 0.95rem;
+        }
+
+        .data-btn {
+            background: #2A2A2A;
+            border: 1px dashed #555;
+            color: #888;
+            padding: 8px 12px;
+            border-radius: 4px;
+            min-width: 100px;
+            text-align: center;
+            cursor: pointer;
+            font-size: 0.9rem;
+            transition: all 0.2s;
+        }
+
+        .data-btn:hover {
+            border-color: var(--accent-cyan);
+            color: var(--text-color);
+        }
+
+        .data-btn.loaded {
+            border-style: solid;
+            border-color: var(--accent-cyan);
+            color: #FFF;
+            font-weight: bold;
+            background: #152535;
+        }
+
+        /* 고정 정보 텍스트 스타일 */
+        .fixed-text {
+            font-size: 0.95rem;
+            line-height: 1.6;
+            color: #B0B0B0;
+            margin-bottom: 8px;
+        }
+
+        .fixed-text strong {
+            color: #FFF;
+        }
+
+        /* 하단 컨트롤 바 */
+        footer {
+            margin-top: auto;
+            padding-top: 15px;
+            border-top: 1px solid var(--border-color);
+            display: flex;
+            gap: 10px;
+        }
+
+        .ctrl-btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 6px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        .primary {
+            background: var(--accent-cyan);
+            color: #000;
+        }
+
+        .secondary {
+            background: #333;
+            color: #FFF;
+        }
+    </style>
+</head>
+
+<body>
+
+    <header>
+        <h1>A380 JOINT BRIEFING</h1>
+        <div class="status-badge" id="online-status">OFFLINE READY</div>
+    </header>
+
+    <div class="tabs">
+        <button class="tab-btn active" onclick="switchPage(1)">PAGE 1: 일일 가변 정보 (OFP)</button>
+        <button class="tab-btn" onclick="switchPage(2)">PAGE 2: 고정 필수 절차</button>
+    </div>
+
+    <div class="content-container">
+
+        <div id="page1" class="page active">
+            <div class="grid">
+                <div class="card cyan">
+                    <h2>■ FLIGHT & AIRCRAFT INFO</h2>
+                    <div class="item-row"><span>Flight Number</span><button class="data-btn" id="ofp-flt-no">AAR
+                            ---</button></div>
+                    <div class="item-row"><span>Tail Number (HL)</span><button class="data-btn"
+                            id="ofp-tail">HL----</button></div>
+                    <div class="item-row"><span>Gate / Spot</span><button class="data-btn" id="ofp-gate">-- /
+                            --</button></div>
+                    <div class="item-row"><span>GND Taxi Time</span><button class="data-btn" id="ofp-taxi">--
+                            Min</button></div>
+                </div>
+
+                <div class="card cyan">
+                    <h2>■ SCHEDULE & ROUTE</h2>
+                    <div class="item-row"><span>Departure / Arrival</span><button class="data-btn" id="ofp-route">--- →
+                            ---</button></div>
+                    <div class="item-row"><span>STD / STA (UTC)</span><button class="data-btn" id="ofp-time">--:-- /
+                            --:--</button></div>
+                    <div class="item-row"><span>Flight Time</span><button class="data-btn" id="ofp-flt-time">--H
+                            --M</button></div>
+                    <div class="item-row"><span>Route / Altitude</span><button class="data-btn" id="ofp-alt">---- /
+                            FL---</button></div>
+                </div>
+
+                <div class="card cyan">
+                    <h2>■ PAX & CARGO STATUS</h2>
+                    <div class="item-row"><span>Total PAX (Business)</span><button class="data-btn" id="ofp-pax">---
+                            (Biz: --)</button></div>
+                    <div class="item-row"><span>Cargo Weight</span><button class="data-btn" id="ofp-cargo">--.-
+                            Tons</button></div>
+                    <div class="item-row"><span>Special PAX (UM/WCHR)</span><button class="data-btn"
+                            id="ofp-spax">None</button></div>
+                    <div class="item-row"><span>Alternate Airport</span><button class="data-btn" id="ofp-alt-apt">----
+                            (-- Min)</button></div>
+                </div>
+
+                <div class="card amber">
+                    <h2>■ WEATHER INFO (METAR/TAF)</h2>
+                    <div class="item-row"><span>DEP / ARR Temp</span><button class="data-btn" id="ofp-wxh-temp">--°C /
+                            --°C</button></div>
+                    <div class="item-row"><span>Enroute Turbulence</span><button class="data-btn"
+                            id="ofp-wxh-turb">Light 예보</button></div>
+                    <div class="item-row"><span>Specific Turb Time</span><button class="data-btn"
+                            id="ofp-wxh-turb-detail">이륙 후 --분</button></div>
+                </div>
+            </div>
+        </div>
+
+        <div id="page2" class="page">
+            <div class="grid">
+                <div class="card amber">
+                    <h2>■ SECURITY (보안)</h2>
+                    <div class="item-row"><span>Security Level</span><button class="data-btn loaded">NORMAL</button>
+                    </div>
+                    <p class="fixed-text">✓ 전 승무원 보안요원 명심 및 각 <strong>ZONE별 등급 맞는 보안점검</strong> 실시</p>
+                    <p class="fixed-text">✓ 거동 수상자 또는 의심 물건 발견 즉시 Cockpit 보고</p>
+                    <p class="fixed-text">✓ 브리핑 종료 후 각 Zone별 <strong>비상벨 점검</strong> 필수</p>
+                </div>
+
+                <div class="card cyan">
+                    <h2>■ COCKPIT ENTRY (조종실 출입)</h2>
+                    <p class="fixed-text">✓ 출입 전 반드시 <strong>인터폰으로 선 연락</strong> 실시</p>
+                    <div class="item-row"><span>Knock Count / Code</span><button class="data-btn loaded">규정 노크 +
+                            Code</button></div>
+                    <p class="fixed-text">✓ 조종실 주변 청정구역 유지 철저</p>
+                    <p class="fixed-text">✓ 이착륙 단계를 제외하고 <strong>항시 커텐 유지</strong></p>
+                </div>
+
+                <div class="card amber">
+                    <h2>■ SIGNALS & SAFETY (신호/비정상)</h2>
+                    <p class="fixed-text">✓ <strong>Seatbelt Sign 1회:</strong> Light Turb 예상/조우 시</p>
+                    <p class="fixed-text">✓ <strong>Seatbelt Sign 2회:</strong> MOD / SVR Turb 조우 시</p>
+                    <p class="fixed-text">✓ 카트 및 Coffee Pot 고정 철저, PA는 객실에서 1차 실시</p>
+                    <p class="fixed-text">✓ 비상상황/객실환자 발생 시 <strong>매니저 경유 보고 체계</strong> 일원화</p>
+                    <p class="fixed-text">✓ <strong>Sterile Cockpit:</strong> 10,000ft 이하 필수 준수 (안전 심각 영향 시 예외)</p>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <footer>
+        <button class="ctrl-btn primary" onclick="simulateOFPload()">OFP 데이터 연동 테스트</button>
+        <button class="ctrl-btn secondary" onclick="alert('기타 사항은 아시아나 표준절차(SOP)를 따릅니다.')">Standard Procedure</button>
+    </footer>
+
+    <script>
+        // 페이지 슬라이드(탭) 전환 함수
+        function switchPage(pageNum) {
+            document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+
+            document.getElementById('page' + pageNum).classList.add('active');
+            document.querySelectorAll('.tab-btn')[pageNum - 1].classList.add('active');
+        }
+
+        // 향후 OFP 파싱 데이터가 들어왔을 때 자동으로 채워지는 시뮬레이션 함수
+        function simulateOFPload() {
+            const sampleData = {
+                'ofp-flt-no': 'AAR 222',
+                'ofp-tail': 'HL7625',
+                'ofp-gate': '10A / 42',
+                'ofp-taxi': '15 Min',
+                'ofp-route': 'ICN → JFK',
+                'ofp-time': '10:20 / 23:40',
+                'ofp-flt-time': '13H 20M',
+                'ofp-alt': 'PKS → FL350',
+                'ofp-pax': '405명 (Biz: 52)',
+                'ofp-cargo': '23.5 Tons',
+                'ofp-spax': 'UM 2 / WCHR 1',
+                'ofp-alt-apt': 'BOS (45 Min)',
+                'ofp-wxh-temp': '22°C / 12°C',
+                'ofp-wxh-turb': '지속적 Light 예보',
+                'ofp-wxh-turb-detail': '이륙 후 40분부터 약 20분간'
+            };
+
+            for (const [id, value] of Object.entries(sampleData)) {
+                const btn = document.getElementById(id);
+                if (btn) {
+                    btn.textContent = value;
+                    btn.classList.add('loaded'); // 활성화 스타일 적용
+                }
+            }
+            alert('OFP 비행 스케줄 및 기상 데이터 파싱 완료!');
+        }
+
+        // 오프라인 작동을 위한 컴팩트 인라인 Service Worker 등록 코드
+        if ('serviceWorker' in navigator) {
+            const swCode = `
+                const CACHE_NAME = 'a380-briefing-v1';
+                self.addEventListener('install', e => {
+                    e.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(['./', './index.html'])));
+                });
+                self.addEventListener('fetch', e => {
+                    e.respondWith(caches.match(e.request).then(res => res || fetch(e.request)));
+                });
+            `;
+            const blob = new Blob([swCode], { type: 'application/javascript' });
+            navigator.serviceWorker.register(URL.createObjectURL(blob));
+        }
+    </script>
+</body>
+
+</html>
