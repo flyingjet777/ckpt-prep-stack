@@ -173,9 +173,9 @@ for (let i = 0; i < lines.length; i++) {
 [페이지 1]     표지
 [페이지 2-5]   메인 CFP (연료, 루트 테이블, 서명란)  ← 파싱 대상
 [페이지 5]     FPL 복사본
-[페이지 6]     Wind/Temp Summary
+[가변 페이지]  Wind/Temp Summary (OFP에 따라 여러 페이지로 이어질 수 있음)
 [페이지 7-8]   REFILE FLT PLAN (ADNAP→RJTT)         ← break 필요
-[페이지 8]     END OF JEPPESEN DATAPLAN              ← break 필요
+[가변 위치]    END OF JEPPESEN DATAPLAN              ← break 필요
 [페이지 9-10]  ATS FPL 사본
 [페이지 11]    VAG 화산재 차트
 [페이지 12-17] Dispatch Release, Weather Briefing
