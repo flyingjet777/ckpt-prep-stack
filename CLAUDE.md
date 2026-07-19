@@ -1,6 +1,6 @@
 # ckpt-prep-stack — Claude Code 작업 인수인계
 
-> 작성일: 2026-06-25 (최종 갱신: 2026-06-25 — SR 버그 수정 + 게이트 API 키 + 통합 테스트 완료)  
+> 작성일: 2026-06-25 (최종 갱신: 2026-07-20 — CRZ WIND 기능 추가 및 main 반영)
 > 작성자: Claude (claude.ai 세션 → Claude Code 인수인계용)
 
 ---
@@ -190,7 +190,29 @@ for (let i = 0; i < lines.length; i++) {
 
 ---
 
-## 9. 작업 시 주의사항
+## 9. 2026-07-20 CRZ WIND 기능 추가
+
+- 메인 INIT 버튼: `STEP ALT/WIND`
+- STEP ALT 내부 탭: `STEP ALT`, `CRZ WIND`
+- OFP의 `START OF WIND AND TEMPERATURE SUMMARY` 구간에서 FL330/350/370/390 WIND/SAT 추출
+- 표시 형식: `DDD/SSS SAT`, CMP는 표시하지 않음
+- PDF IMPORT마다 WIND DATA를 새로 파싱하고, reset 시 이전 데이터를 삭제
+- OFP 노선명과 관계없이 summary 제목을 인식하며, 3~5글자 및 좌표 waypoint를 처리
+- 좌표 표기 정규화: `65N160W=65N60`, `37N170E=37E70`, `37N180E=37E80`
+- STEP ALT waypoint와 고도가 일치하는 CRZ WIND 고도 셀은 그린색
+- 그 외 WIND 색상 규칙: 방향 30° 이상, 속도 30kt 이상, SAT 5°C 이상 변화 시 시안색; 범위 내는 흰색
+- 방향/속도/SAT 기준값은 각각 독립적으로 갱신
+- CRZ WIND는 10개 waypoint 단위로 표시하며 위/아래 버튼과 RETURN 버튼 유지
+- 하단 `WIND/SAT · OFP DEP TO DEST` 문구는 IMPORT한 출발/도착 공항을 표시
+- 작업 문서: `WIND_DATA.md`, 상세 인수인계: `WORKNOTE_2026-07-20.md`
+
+### 현재 커밋 상태
+
+- `dev`: `c659093` — Add OFP CRZ WIND data workflow
+- `main`: `e29a157` — Merge dev into main
+- 2026-07-20 인수인계 문서 커밋은 이후 생성 예정
+
+## 10. 작업 시 주의사항
 
 - 아시아나항공은 **중동 노선 운항하지 않음** — 관련 내용 추가 금지
 - NOTAM 브리핑 기준: **Code F (A380) 해당 항목만** 필터링
