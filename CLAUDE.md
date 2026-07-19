@@ -210,8 +210,7 @@ for (let i = 0; i < lines.length; i++) {
 
 ### 현재 커밋 상태
 
-- `dev`: `c659093` — Add OFP CRZ WIND data workflow
-- `main`: `5e4da06` — Refresh cache for directional wind parser
+- `dev`와 `main`: ARINC 424 정규화 및 `52S160W=52W60` 수정이 반영된 최신 병합 커밋 사용
 - 인수인계 문서: `WORKNOTE_2026-07-20.md`
 
 ### 2026-07-20 최종 코드 검토
